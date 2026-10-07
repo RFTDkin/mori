@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+websockets
+python-dotenv
+groq
+ddgs
+numpy
+pydantic
+yt-dlp
+pydantic-settings
