@@ -1,6 +1,17 @@
 from typing import Dict, Any, List
+from datetime import datetime, timedelta, timezone
+import json
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 from ddgs import DDGS
 import yt_dlp
+
+
+def _get_json(url: str) -> Dict[str, Any]:
+    """Fetch a public JSON endpoint without requiring the user to enter an API key."""
+    request = Request(url, headers={"User-Agent": "MORI graduation-project assistant/1.0"})
+    with urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 def search_web_results(query: str) -> Dict[str, Any]:
     """Return structured web search results for the frontend."""
@@ -88,6 +99,91 @@ def show_chart(chart_type: str, title: str, labels: List[str], values: List[floa
         }
     }
 
+
+def get_weather(location: str) -> Dict[str, Any]:
+    """Return current weather from Open-Meteo using a human-readable place name."""
+    try:
+        places = _get_json(
+            "https://geocoding-api.open-meteo.com/v1/search?name="
+            f"{quote(location)}&count=1&language=ja&format=json"
+        ).get("results", [])
+        if not places:
+            return {"text": f"「{location}」の場所を見つけられませんでした。"}
+
+        place = places[0]
+        weather = _get_json(
+            "https://api.open-meteo.com/v1/forecast?latitude="
+            f"{place['latitude']}&longitude={place['longitude']}"
+            "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m"
+            "&timezone=auto"
+        ).get("current", {})
+        code = weather.get("weather_code")
+        descriptions = {
+            0: "快晴", 1: "晴れ", 2: "晴れ時々くもり", 3: "くもり", 45: "霧", 48: "霧氷",
+            51: "弱い霧雨", 53: "霧雨", 55: "強い霧雨", 61: "弱い雨", 63: "雨", 65: "強い雨",
+            71: "弱い雪", 73: "雪", 75: "大雪", 80: "にわか雨", 81: "にわか雨", 82: "激しいにわか雨",
+            95: "雷雨", 96: "ひょうを伴う雷雨", 99: "激しいひょうを伴う雷雨",
+        }
+        name = place.get("name", location)
+        admin = place.get("admin1")
+        label = f"{name}（{admin}）" if admin and admin != name else name
+        temperature = weather.get("temperature_2m")
+        condition = descriptions.get(code, "観測情報")
+        text = f"{label}の現在の天気は{condition}、気温は{temperature}℃です。"
+        return {
+            "text": text,
+            "ui_command": {
+                "type": "weather",
+                "data": {
+                    "location": label,
+                    "temperature": temperature,
+                    "apparent_temperature": weather.get("apparent_temperature"),
+                    "humidity": weather.get("relative_humidity_2m"),
+                    "wind_speed": weather.get("wind_speed_10m"),
+                    "condition": condition,
+                    "observed_at": weather.get("time"),
+                },
+            },
+        }
+    except Exception as e:
+        return {"text": f"天気情報の取得に失敗しました: {str(e)}"}
+
+
+def get_stock_history(symbol: str, days: int = 30) -> Dict[str, Any]:
+    """Get daily closing prices from Yahoo Finance's public chart endpoint."""
+    try:
+        days = max(1, min(int(days), 365))
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=days + 10)  # Preserve 30 trading days through weekends/holidays.
+        url = (
+            "https://query1.finance.yahoo.com/v8/finance/chart/"
+            f"{quote(symbol.upper())}?period1={int(start.timestamp())}&period2={int(end.timestamp())}&interval=1d"
+        )
+        result = _get_json(url).get("chart", {}).get("result", [])
+        if not result:
+            return {"text": f"{symbol.upper()}の株価データを取得できませんでした。"}
+        series = result[0]
+        timestamps = series.get("timestamp") or []
+        closes = (series.get("indicators", {}).get("quote") or [{}])[0].get("close") or []
+        points = [
+            (datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%m/%d"), round(float(close), 2))
+            for timestamp, close in zip(timestamps, closes)
+            if close is not None
+        ][-days:]
+        if not points:
+            return {"text": f"{symbol.upper()}の有効な終値データを取得できませんでした。"}
+        labels, values = zip(*points)
+        payload = {"symbol": symbol.upper(), "labels": list(labels), "values": list(values)}
+        return {
+            "text": (
+                f"{symbol.upper()}の直近{len(points)}営業日の終値データです。"
+                "グラフ表示が必要な依頼では、次にshow_chartをline形式で呼び出してください。\n"
+                + json.dumps(payload, ensure_ascii=False)
+            )
+        }
+    except Exception as e:
+        return {"text": f"株価データの取得に失敗しました: {str(e)}"}
+
 def close_ui() -> Dict[str, Any]:
     """Command to return to default UI state."""
     return {
@@ -115,6 +211,33 @@ TOOLS_SCHEMA = [
                 "required": ["query"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "指定した都市・地域の現在の天気を取得して画面に表示します。最新の天気を尋ねられた時に使います。",
+            "parameters": {
+                "type": "object",
+                "properties": {"location": {"type": "string", "description": "都市名または地域名"}},
+                "required": ["location"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_stock_history",
+            "description": "株式銘柄の終値履歴を取得します。株価の推移・期間指定・グラフ依頼に使います。Tesla は TSLA を使用します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "株式ティッカー。例: TSLA, AAPL, 7203.T"},
+                    "days": {"type": "integer", "description": "取得する直近営業日数。例: 30"},
+                },
+                "required": ["symbol", "days"],
+            },
+        },
     },
     {
         "type": "function",
@@ -204,6 +327,10 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             arguments.get("labels", []),
             arguments.get("values", [])
         )
+    elif name == "get_weather":
+        return get_weather(arguments.get("location", ""))
+    elif name == "get_stock_history":
+        return get_stock_history(arguments.get("symbol", ""), arguments.get("days", 30))
     elif name == "close_ui":
         return close_ui()
     else:

@@ -37,19 +37,9 @@ class MoriAgent:
                     "tools_used": [],
                 }
 
-            tool_name = "play_youtube" if intent.action == "youtube_search" else "search_web"
-            tool_result = await asyncio.to_thread(execute_tool, tool_name, {"query": intent.query})
-            if tool_name == "search_web":
-                media_data = tool_result.get("ui_command", {}).get("data", {})
-                results = media_data.get("results", [])
-                error = media_data.get("error")
-                if error:
-                    tool_result["text"] = f"Web検索に失敗しました: {error}"
-                elif results:
-                    tool_result["text"] = f"検索結果を画面に表示しました。{len(results)}件見つかりました。"
-                else:
-                    tool_result["text"] = "検索結果は見つかりませんでした。"
-            return {**tool_result, "tools_used": [tool_name]}
+            # Searches can be part of a larger request (for example, research then
+            # graph the result). Let the LLM plan those multi-step requests instead
+            # of short-circuiting them with a keyword rule.
 
         self.history.append({"role": "user", "content": user_message})
         
@@ -102,7 +92,8 @@ class MoriAgent:
                     args = json.loads(tool_call.function.arguments)
                     tools_used.append(func_name)
                     
-                    tool_result = execute_tool(func_name, args)
+                    # Network-backed tools must not freeze the WebSocket event loop.
+                    tool_result = await asyncio.to_thread(execute_tool, func_name, args)
                     
                     if "ui_command" in tool_result:
                         ui_command = tool_result["ui_command"]

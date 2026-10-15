@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import CoreVisual from './CoreVisual';
 import ChartDisplay from './ChartDisplay';
+import WeatherDisplay from './WeatherDisplay';
 import MediaPanel, { MediaData } from './MediaPanel';
 import ChatInput from './ChatInput';
 import MessageLog from './MessageLog';
@@ -11,7 +12,7 @@ import useWebSocket from '../hooks/useWebSocket';
 import useVoice from '../hooks/useVoice';
 import useGesture, { GestureEvent } from '../hooks/useGesture';
 
-type UIMode = 'core' | 'media' | 'chart';
+type UIMode = 'core' | 'media' | 'chart' | 'weather';
 
 export interface Message {
   id: string;
@@ -26,9 +27,11 @@ export default function MoriInterface() {
   const [mediaData, setMediaData] = useState<MediaData | null>(null);
   const [mediaIndex, setMediaIndex] = useState(0);
   const [chartData, setChartData] = useState<any>(null);
+  const [weatherData, setWeatherData] = useState<any>(null);
   const [time, setTime] = useState<string>('');
   const [gestureEnabled, setGestureEnabled] = useState(false);
-  const [showLog, setShowLog] = useState(true);
+  // Keep the command console out of the way until the user explicitly opens it.
+  const [showConsole, setShowConsole] = useState(false);
 
   const { isConnected, sendMessage } = useWebSocket('ws://localhost:8000/ws/chat', (data) => {
     if (data.type === 'text_response') {
@@ -47,6 +50,9 @@ export default function MoriInterface() {
       } else if (data.command === 'show_chart') {
         setChartData(data.payload);
         setCurrentUI('chart');
+      } else if (data.command === 'show_weather') {
+        setWeatherData(data.payload);
+        setCurrentUI('weather');
       } else if (data.command === 'navigate_media') {
         setMediaIndex((index) => {
           const count = mediaData?.results.length || 0;
@@ -78,7 +84,7 @@ export default function MoriInterface() {
         if (currentUI === 'media' && mediaData?.results.length) {
           setMediaIndex((index) => (index + 1) % mediaData.results.length);
         } else {
-          setShowLog(prev => !prev);
+          setShowConsole(prev => !prev);
         }
         break;
       case 'open_hand':
@@ -170,7 +176,7 @@ export default function MoriInterface() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden relative">
-        {showLog && <MessageLog messages={messages} />}
+        {showConsole && <MessageLog messages={messages} />}
         
         <div className="flex-1 flex flex-col relative z-10 p-6">
           <div className="flex-1 flex items-center justify-center relative">
@@ -191,10 +197,31 @@ export default function MoriInterface() {
             {currentUI === 'chart' && chartData && (
               <ChartDisplay data={chartData} onClose={() => setCurrentUI('core')} />
             )}
+
+            {currentUI === 'weather' && weatherData && (
+              <WeatherDisplay data={weatherData} onClose={() => setCurrentUI('core')} />
+            )}
           </div>
-          
-          <ChatInput onSend={handleSend} isListening={isListening} onToggleListen={isListening ? stopListening : startListening} />
+
+          {showConsole && (
+            <ChatInput onSend={handleSend} isListening={isListening} onToggleListen={isListening ? stopListening : startListening} />
+          )}
         </div>
+
+        <button
+          type="button"
+          onClick={() => setShowConsole(prev => !prev)}
+          aria-label={showConsole ? 'Close command console' : 'Open command console'}
+          className={`absolute bottom-5 right-6 z-30 flex items-center gap-2 rounded border px-4 py-2 text-xs font-bold tracking-widest transition-colors ${
+            showConsole
+              ? 'border-neon-magenta/70 bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta hover:text-black'
+              : 'border-neon-cyan/70 bg-black/70 text-neon-cyan hover:bg-neon-cyan hover:text-black'
+          }`}
+          style={{ fontFamily: 'Orbitron' }}
+        >
+          <span className="text-base leading-none">{showConsole ? '×' : '⌘'}</span>
+          {showConsole ? 'HIDE CONSOLE' : 'COMMAND CONSOLE'}
+        </button>
       </div>
       
       {/* Gesture Overlay */}

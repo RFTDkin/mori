@@ -91,6 +91,12 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "command": "show_chart",
                                 "payload": cmd_data
                             })
+                        elif cmd_type == "weather":
+                            await websocket.send_json({
+                                "type": "ui_command",
+                                "command": "show_weather",
+                                "payload": cmd_data
+                            })
                         elif cmd_type == "media":
                             await websocket.send_json({
                                 "type": "ui_command",

@@ -7,13 +7,20 @@ interface ChartDisplayProps {
     title: string;
     labels: string[];
     values: number[];
-    type: 'bar' | 'line';
+    chart_type: 'bar' | 'line' | 'pie';
   };
   onClose: () => void;
 }
 
 export default function ChartDisplay({ data, onClose }: ChartDisplayProps) {
   const maxVal = Math.max(...data.values);
+  const minVal = Math.min(...data.values);
+  const range = maxVal - minVal || 1;
+  const linePoints = data.values.map((value, index) => {
+    const x = data.values.length === 1 ? 50 : (index / (data.values.length - 1)) * 100;
+    const y = 94 - ((value - minVal) / range) * 82;
+    return `${x},${y}`;
+  }).join(' ');
 
   return (
     <div className="w-full max-w-2xl p-6 relative border border-neon-magenta/50 rounded bg-black/80 shadow-[0_0_20px_rgba(255,0,255,0.2)]">
@@ -28,22 +35,35 @@ export default function ChartDisplay({ data, onClose }: ChartDisplayProps) {
         {data.title}
       </h3>
       
-      <div className="h-64 flex items-end justify-between gap-2 border-b border-l border-neon-magenta/30 pb-2 pl-2">
-        {data.values.map((val, idx) => (
-          <div key={idx} className="flex flex-col items-center flex-1 group">
-            <div className="opacity-0 group-hover:opacity-100 text-xs text-neon-magenta mb-2 transition-opacity">
-              {val}
-            </div>
-            <div 
-              className="w-full bg-neon-magenta/60 hover:bg-neon-magenta transition-all"
-              style={{ height: `${(val / maxVal) * 100}%` }}
-            ></div>
-            <div className="text-xs text-neon-magenta/70 mt-2 truncate w-full text-center">
-              {data.labels[idx]}
-            </div>
+      {data.chart_type === 'line' ? (
+        <div className="relative h-64 border-b border-l border-neon-magenta/30">
+          <div className="absolute -left-1 -top-5 text-xs text-neon-magenta/70">{maxVal}</div>
+          <div className="absolute -left-1 -bottom-5 text-xs text-neon-magenta/70">{minVal}</div>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" role="img" aria-label={data.title}>
+            <polyline points={linePoints} fill="none" stroke="currentColor" strokeWidth="1.2" vectorEffect="non-scaling-stroke" className="text-neon-magenta drop-shadow-[0_0_6px_rgba(255,0,255,0.9)]" />
+            {data.values.map((value, index) => {
+              const x = data.values.length === 1 ? 50 : (index / (data.values.length - 1)) * 100;
+              const y = 94 - ((value - minVal) / range) * 82;
+              return <circle key={index} cx={x} cy={y} r="1.5" className="fill-neon-magenta" />;
+            })}
+          </svg>
+          <div className="absolute inset-x-0 -bottom-8 flex justify-between text-[10px] text-neon-magenta/70">
+            <span>{data.labels[0]}</span>
+            <span>{data.labels[Math.floor(data.labels.length / 2)]}</span>
+            <span>{data.labels[data.labels.length - 1]}</span>
           </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="h-64 flex items-end justify-between gap-2 border-b border-l border-neon-magenta/30 pb-2 pl-2">
+          {data.values.map((val, idx) => (
+            <div key={idx} className="flex flex-col items-center flex-1 group">
+              <div className="opacity-0 group-hover:opacity-100 text-xs text-neon-magenta mb-2 transition-opacity">{val}</div>
+              <div className="w-full bg-neon-magenta/60 hover:bg-neon-magenta transition-all" style={{ height: `${(val / maxVal) * 100}%` }} />
+              <div className="text-xs text-neon-magenta/70 mt-2 truncate w-full text-center">{data.labels[idx]}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

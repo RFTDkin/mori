@@ -56,10 +56,13 @@ export default function useVoice(onResult: (text: string) => void, onWakeWord: (
     };
 
     recognition.onerror = (event: any) => {
-      console.error('Speech recognition error', event.error);
-      if (event.error !== 'aborted') {
-        setIsListening(false);
+      if (event.error === 'no-speech' || event.error === 'aborted') {
+        return;
       }
+
+      console.error('Speech recognition error', event.error);
+      isListeningRef.current = false;
+      setIsListening(false);
     };
 
     recognition.onend = () => {
@@ -76,16 +79,19 @@ export default function useVoice(onResult: (text: string) => void, onWakeWord: (
     recognitionRef.current = recognition;
 
     return () => {
+      isListeningRef.current = false;
       recognition.stop();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startListening = useCallback(() => {
     if (recognitionRef.current && !isListeningRef.current) {
+      isListeningRef.current = true;
       try {
         recognitionRef.current.start();
         setIsListening(true);
       } catch (e) {
+        isListeningRef.current = false;
         console.error(e);
       }
     }
@@ -93,6 +99,7 @@ export default function useVoice(onResult: (text: string) => void, onWakeWord: (
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current && isListeningRef.current) {
+      isListeningRef.current = false;
       recognitionRef.current.stop();
       setIsListening(false);
     }
