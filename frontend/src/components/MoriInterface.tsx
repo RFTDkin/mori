@@ -26,6 +26,7 @@ export default function MoriInterface() {
   const [currentUI, setCurrentUI] = useState<UIMode>('core');
   const [mediaData, setMediaData] = useState<MediaData | null>(null);
   const [mediaIndex, setMediaIndex] = useState(0);
+  const [webPreviewOpen, setWebPreviewOpen] = useState(false);
   const [mediaControl, setMediaControl] = useState({ actions: [] as string[], version: 0 });
   const [chartData, setChartData] = useState<any>(null);
   const [weatherData, setWeatherData] = useState<any>(null);
@@ -43,10 +44,12 @@ export default function MoriInterface() {
       if (data.command === 'media_loading') {
         setMediaData({ ...data.payload, results: [], error: null, loading: true });
         setMediaIndex(0);
+        setWebPreviewOpen(false);
         setCurrentUI('media');
       } else if (data.command === 'show_media') {
         setMediaData({ ...data.payload, loading: false });
         setMediaIndex(0);
+        setWebPreviewOpen(false);
         setCurrentUI('media');
       } else if (data.command === 'show_chart') {
         setChartData(data.payload);
@@ -70,7 +73,11 @@ export default function MoriInterface() {
       } else if (data.command === 'control_youtube') {
         setMediaControl((current) => ({ actions: data.payload.actions || [], version: current.version + 1 }));
       } else if (data.command === 'reset') {
-        setCurrentUI('core');
+        if (currentUI === 'media' && mediaData?.mode === 'web' && webPreviewOpen) {
+          setWebPreviewOpen(false);
+        } else {
+          setCurrentUI('core');
+        }
       }
     }
   });
@@ -200,6 +207,9 @@ export default function MoriInterface() {
                 onSelect={setMediaIndex}
                 onSearch={(query) => handleSend(mediaData.mode === 'youtube' ? `YouTubeで${query}を検索して` : `ネットで${query}を検索して`)}
                 onClose={() => setCurrentUI('core')}
+                webPreviewOpen={webPreviewOpen}
+                onOpenWebsite={() => setWebPreviewOpen(true)}
+                onCloseWebsite={() => setWebPreviewOpen(false)}
                 playerActions={mediaControl.actions}
                 controlVersion={mediaControl.version}
               />

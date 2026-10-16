@@ -23,11 +23,14 @@ interface MediaPanelProps {
   onSelect: (index: number) => void;
   onSearch: (query: string) => void;
   onClose: () => void;
+  webPreviewOpen?: boolean;
+  onOpenWebsite?: () => void;
+  onCloseWebsite?: () => void;
   playerActions?: string[];
   controlVersion?: number;
 }
 
-export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, onClose, playerActions = [], controlVersion = 0 }: MediaPanelProps) {
+export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, onClose, webPreviewOpen = false, onOpenWebsite, onCloseWebsite, playerActions = [], controlVersion = 0 }: MediaPanelProps) {
   const [query, setQuery] = useState(data.query);
   const [muted, setMuted] = useState(true);
   const [theaterMode, setTheaterMode] = useState(false);
@@ -73,6 +76,34 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
     if (!data.results.length) return;
     onSelect((selectedIndex + offset + data.results.length) % data.results.length);
   };
+
+  if (data.mode === 'web' && webPreviewOpen && selected?.url) {
+    return (
+      <section className="fixed inset-4 z-[70] flex flex-col overflow-hidden border border-neon-cyan/60 bg-black shadow-[0_0_36px_rgba(0,240,255,0.28)]">
+        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-neon-cyan/35 bg-black/95 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-xs font-bold tracking-[0.18em] text-neon-cyan/65">WEBSITE PREVIEW</p>
+            <h2 className="truncate text-sm font-semibold text-neon-cyan">{selected.title}</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onCloseWebsite}
+            aria-label="検索結果に戻る"
+            title="検索結果に戻る"
+            className="flex h-10 w-10 shrink-0 items-center justify-center border border-neon-cyan text-2xl text-neon-cyan transition-colors hover:bg-neon-cyan hover:text-black"
+          >
+            ×
+          </button>
+        </header>
+        <iframe
+          src={selected.url}
+          title={selected.title}
+          className="min-h-0 flex-1 bg-white"
+          sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin"
+        />
+      </section>
+    );
+  }
 
   return (
     <section className={`flex h-full w-full flex-col overflow-hidden border border-neon-cyan/50 bg-black/90 shadow-[0_0_30px_rgba(0,240,255,0.16)] ${theaterMode ? 'fixed inset-0 z-[60] max-w-none' : 'max-h-[min(76vh,760px)] max-w-5xl'}`}>
@@ -129,24 +160,6 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
                 <button type="button" onClick={fullscreen} className="border border-neon-cyan/70 bg-black/80 px-3 py-1 text-xs text-neon-cyan hover:bg-neon-cyan hover:text-black">FULLSCREEN</button>
               </div>
             </>
-          ) : data.mode === 'web' && selected?.url ? (
-            <div className="absolute inset-0 flex flex-col bg-black">
-              <iframe
-                key={selected.url}
-                src={selected.url}
-                title={selected.title}
-                className="min-h-0 flex-1 bg-white"
-                sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin"
-              />
-              <a
-                href={selected.url}
-                target="_blank"
-                rel="noreferrer"
-                className="shrink-0 border-t border-neon-cyan/30 bg-black px-3 py-2 text-center text-xs text-neon-green hover:bg-neon-green/10"
-              >
-                このサイトを新しいタブで開く ↗
-              </a>
-            </div>
           ) : data.loading ? (
             <p className="animate-pulse px-6 text-center text-sm text-neon-cyan">検索中...</p>
           ) : data.error ? (
@@ -173,7 +186,10 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
               <button
                 key={result.id || result.url || `${result.title}-${index}`}
                 type="button"
-                onClick={() => onSelect(index)}
+                onClick={() => {
+                  onSelect(index);
+                  if (data.mode === 'web') onOpenWebsite?.();
+                }}
                 className={`block w-full border p-3 text-left transition-colors ${selectedIndex === index ? 'border-neon-cyan/70 bg-neon-cyan/10' : 'border-neon-cyan/15 hover:border-neon-cyan/45'}`}
               >
                 <span className="block text-sm font-semibold text-neon-cyan"><span className="mr-2 text-neon-magenta">{index + 1}.</span>{result.title}</span>
