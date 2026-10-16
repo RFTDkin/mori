@@ -129,6 +129,24 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
                 <button type="button" onClick={fullscreen} className="border border-neon-cyan/70 bg-black/80 px-3 py-1 text-xs text-neon-cyan hover:bg-neon-cyan hover:text-black">FULLSCREEN</button>
               </div>
             </>
+          ) : data.mode === 'web' && selected?.url ? (
+            <div className="absolute inset-0 flex flex-col bg-black">
+              <iframe
+                key={selected.url}
+                src={selected.url}
+                title={selected.title}
+                className="min-h-0 flex-1 bg-white"
+                sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin"
+              />
+              <a
+                href={selected.url}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 border-t border-neon-cyan/30 bg-black px-3 py-2 text-center text-xs text-neon-green hover:bg-neon-green/10"
+              >
+                このサイトを新しいタブで開く ↗
+              </a>
+            </div>
           ) : data.loading ? (
             <p className="animate-pulse px-6 text-center text-sm text-neon-cyan">検索中...</p>
           ) : data.error ? (
@@ -136,7 +154,7 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
           ) : data.mode === 'youtube' ? (
             <p className="px-6 text-center text-sm text-neon-cyan/60">検索語を入力するか、音声で動画をお申し付けください。</p>
           ) : (
-            <p className="px-6 text-center text-sm text-neon-cyan/60">検索結果を選ぶと、詳細を表示します。</p>
+            <p className="px-6 text-center text-sm text-neon-cyan/60">右側の検索結果を選ぶと、ここにウェブサイトを表示します。</p>
           )}
         </div>
 
@@ -169,7 +187,7 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
           </div>
           {data.mode === 'web' && selected?.url && (
             <a href={selected.url} target="_blank" rel="noreferrer" className="border-t border-neon-cyan/20 px-3 py-2 text-center text-xs text-neon-green hover:bg-neon-green/10">
-              選択したページを開く ↗
+              新しいタブで開く ↗
             </a>
           )}
         </div>
