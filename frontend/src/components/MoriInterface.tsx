@@ -223,10 +223,10 @@ export default function MoriInterface() {
           type="button"
           onClick={() => setShowConsole(prev => !prev)}
           aria-label={showConsole ? 'Close command console' : 'Open command console'}
-          className={`absolute bottom-5 right-6 z-30 flex items-center gap-2 rounded border px-4 py-2 text-xs font-bold tracking-widest transition-colors ${
+          className={`absolute right-6 z-30 flex items-center gap-2 rounded border px-4 py-2 text-xs font-bold tracking-widest transition-[bottom,colors] ${
             showConsole
-              ? 'border-neon-magenta/70 bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta hover:text-black'
-              : 'border-neon-cyan/70 bg-black/70 text-neon-cyan hover:bg-neon-cyan hover:text-black'
+              ? 'bottom-24 border-neon-magenta/70 bg-neon-magenta/10 text-neon-magenta hover:bg-neon-magenta hover:text-black'
+              : 'bottom-5 border-neon-cyan/70 bg-black/70 text-neon-cyan hover:bg-neon-cyan hover:text-black'
           }`}
           style={{ fontFamily: 'Orbitron' }}
         >

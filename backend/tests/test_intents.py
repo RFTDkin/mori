@@ -34,6 +34,10 @@ class ClassifyIntentTests(unittest.TestCase):
         intent = classify_intent("再生している動画のミュート解除と全画面にして")
         self.assertEqual((intent.action, intent.query), ("media_control", "unmute,fullscreen"))
 
+    def test_recognizes_unmute_as_a_standalone_control(self):
+        intent = classify_intent("再生している動画のミュートを解除して")
+        self.assertEqual((intent.action, intent.query), ("media_control", "unmute"))
+
 
 if __name__ == "__main__":
     unittest.main()

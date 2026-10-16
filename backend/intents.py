@@ -69,7 +69,9 @@ def classify_intent(message: str) -> Intent | None:
         return Intent("select_media", str(selected_number - 1))
 
     media_actions = []
-    if any(phrase in normalized for phrase in ("ミュート解除", "消音解除", "音を出", "音声をオン", "unmute")):
+    # Speech recognition often inserts particles/spaces: 「ミュートを解除」,
+    # 「ミュート 解除して」, etc. Treat all of these as the same control.
+    if re.search(r"(?:ミュート|消音)\s*(?:を)?\s*解除|音\s*(?:を)?\s*出|音声\s*(?:を)?\s*オン|unmute", normalized, re.IGNORECASE):
         media_actions.append("unmute")
     if any(phrase in normalized for phrase in ("全画面", "フルスクリーン", "fullscreen")):
         media_actions.append("fullscreen")
