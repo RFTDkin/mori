@@ -36,6 +36,21 @@ class MoriAgent:
                     "ui_command": {"type": "navigate", "data": {"direction": intent.action}},
                     "tools_used": [],
                 }
+            if intent.action == "select_media":
+                number = int(intent.query) + 1
+                return {
+                    "text": f"{number}番目の動画を再生します。",
+                    "ui_command": {"type": "select_media", "data": {"index": int(intent.query)}},
+                    "tools_used": [],
+                }
+            if intent.action == "media_control":
+                actions = intent.query.split(",")
+                descriptions = {"unmute": "ミュートを解除", "fullscreen": "全画面表示"}
+                return {
+                    "text": "、".join(descriptions[action] for action in actions) + "します。",
+                    "ui_command": {"type": "media_control", "data": {"actions": actions}},
+                    "tools_used": [],
+                }
 
             # Searches can be part of a larger request (for example, research then
             # graph the result). Let the LLM plan those multi-step requests instead

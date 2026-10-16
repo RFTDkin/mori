@@ -11,7 +11,20 @@ IntentAction = Literal[
     "close",
     "next",
     "previous",
+    "select_media",
+    "media_control",
 ]
+
+_ORDINAL_WORDS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+
+
+def _selected_number(message: str) -> int | None:
+    """Read common forms such as 「第2個」and「二番目」as a one-based index."""
+    match = re.search(r"第?\s*(\d+)\s*(?:個|本|番目|つ|位|番)", message)
+    if match:
+        return int(match.group(1))
+    match = re.search(r"([一二三四五六七八九十])\s*(?:個|本|番目|つ|位|番)", message)
+    return _ORDINAL_WORDS.get(match.group(1)) if match else None
 
 
 @dataclass(frozen=True)
@@ -50,6 +63,18 @@ def classify_intent(message: str) -> Intent | None:
         return Intent("previous")
     if any(phrase in normalized for phrase in ("閉じて", "閉めて", "閉じる", "画面を閉", "戻して", "戻って", "画面を消", "終了して")):
         return Intent("close")
+
+    selected_number = _selected_number(normalized)
+    if selected_number and any(phrase in normalized for phrase in ("再生", "播放", "流して", "見せて", "選んで")):
+        return Intent("select_media", str(selected_number - 1))
+
+    media_actions = []
+    if any(phrase in normalized for phrase in ("ミュート解除", "消音解除", "音を出", "音声をオン", "unmute")):
+        media_actions.append("unmute")
+    if any(phrase in normalized for phrase in ("全画面", "フルスクリーン", "fullscreen")):
+        media_actions.append("fullscreen")
+    if media_actions:
+        return Intent("media_control", ",".join(media_actions))
 
     if _YOUTUBE_PATTERN.search(message):
         query = _extract_query(message)

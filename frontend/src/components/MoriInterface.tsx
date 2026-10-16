@@ -26,6 +26,7 @@ export default function MoriInterface() {
   const [currentUI, setCurrentUI] = useState<UIMode>('core');
   const [mediaData, setMediaData] = useState<MediaData | null>(null);
   const [mediaIndex, setMediaIndex] = useState(0);
+  const [mediaControl, setMediaControl] = useState({ actions: [] as string[], version: 0 });
   const [chartData, setChartData] = useState<any>(null);
   const [weatherData, setWeatherData] = useState<any>(null);
   const [time, setTime] = useState<string>('');
@@ -60,6 +61,14 @@ export default function MoriInterface() {
           const offset = data.payload.direction === 'previous' ? -1 : 1;
           return (index + offset + count) % count;
         });
+      } else if (data.command === 'select_media') {
+        setMediaIndex(() => {
+          const count = mediaData?.results.length || 0;
+          if (!count) return 0;
+          return Math.min(Math.max(data.payload.index, 0), count - 1);
+        });
+      } else if (data.command === 'control_youtube') {
+        setMediaControl((current) => ({ actions: data.payload.actions || [], version: current.version + 1 }));
       } else if (data.command === 'reset') {
         setCurrentUI('core');
       }
@@ -191,6 +200,8 @@ export default function MoriInterface() {
                 onSelect={setMediaIndex}
                 onSearch={(query) => handleSend(mediaData.mode === 'youtube' ? `YouTubeで${query}を検索して` : `ネットで${query}を検索して`)}
                 onClose={() => setCurrentUI('core')}
+                playerActions={mediaControl.actions}
+                controlVersion={mediaControl.version}
               />
             )}
             

@@ -26,6 +26,14 @@ class ClassifyIntentTests(unittest.TestCase):
         self.assertEqual(classify_intent("次の動画へ").action, "next")
         self.assertEqual(classify_intent("検索画面を閉じて").action, "close")
 
+    def test_selects_a_numbered_video(self):
+        intent = classify_intent("第3個を再生して")
+        self.assertEqual((intent.action, intent.query), ("select_media", "2"))
+
+    def test_recognizes_combined_youtube_controls(self):
+        intent = classify_intent("再生している動画のミュート解除と全画面にして")
+        self.assertEqual((intent.action, intent.query), ("media_control", "unmute,fullscreen"))
+
 
 if __name__ == "__main__":
     unittest.main()

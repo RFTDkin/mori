@@ -109,6 +109,18 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "command": "navigate_media",
                                 "payload": cmd_data
                             })
+                        elif cmd_type == "select_media":
+                            await websocket.send_json({
+                                "type": "ui_command",
+                                "command": "select_media",
+                                "payload": cmd_data
+                            })
+                        elif cmd_type == "media_control":
+                            await websocket.send_json({
+                                "type": "ui_command",
+                                "command": "control_youtube",
+                                "payload": cmd_data
+                            })
                         elif cmd_type == "default":
                             await websocket.send_json({
                                 "type": "ui_command",
