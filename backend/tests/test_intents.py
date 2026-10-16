@@ -38,6 +38,10 @@ class ClassifyIntentTests(unittest.TestCase):
         intent = classify_intent("再生している動画のミュートを解除して")
         self.assertEqual((intent.action, intent.query), ("media_control", "unmute"))
 
+    def test_recognizes_console_controls(self):
+        self.assertEqual((classify_intent("コンソールオン").action, classify_intent("コンソールオン").query), ("console_control", "on"))
+        self.assertEqual((classify_intent("コンソールオフ").action, classify_intent("コンソールオフ").query), ("console_control", "off"))
+
 
 if __name__ == "__main__":
     unittest.main()

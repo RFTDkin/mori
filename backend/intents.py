@@ -13,6 +13,7 @@ IntentAction = Literal[
     "previous",
     "select_media",
     "media_control",
+    "console_control",
 ]
 
 _ORDINAL_WORDS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
@@ -63,6 +64,11 @@ def classify_intent(message: str) -> Intent | None:
         return Intent("previous")
     if any(phrase in normalized for phrase in ("閉じて", "閉めて", "閉じる", "画面を閉", "戻して", "戻って", "画面を消", "終了して")):
         return Intent("close")
+
+    if re.search(r"(?:コンソール|console)\s*(?:オン|on|開)", normalized, re.IGNORECASE):
+        return Intent("console_control", "on")
+    if re.search(r"(?:コンソール|console)\s*(?:オフ|off|閉)", normalized, re.IGNORECASE):
+        return Intent("console_control", "off")
 
     selected_number = _selected_number(normalized)
     if selected_number and any(phrase in normalized for phrase in ("再生", "播放", "流して", "見せて", "選んで")):

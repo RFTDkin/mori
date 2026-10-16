@@ -121,6 +121,12 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "command": "control_youtube",
                                 "payload": cmd_data
                             })
+                        elif cmd_type == "console":
+                            await websocket.send_json({
+                                "type": "ui_command",
+                                "command": "set_console",
+                                "payload": cmd_data
+                            })
                         elif cmd_type == "default":
                             await websocket.send_json({
                                 "type": "ui_command",

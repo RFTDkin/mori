@@ -51,6 +51,13 @@ class MoriAgent:
                     "ui_command": {"type": "media_control", "data": {"actions": actions}},
                     "tools_used": [],
                 }
+            if intent.action == "console_control":
+                is_open = intent.query == "on"
+                return {
+                    "text": "コマンドコンソールを開きます。" if is_open else "コマンドコンソールを閉じます。",
+                    "ui_command": {"type": "console", "data": {"open": is_open}},
+                    "tools_used": [],
+                }
 
             # Searches can be part of a larger request (for example, research then
             # graph the result). Let the LLM plan those multi-step requests instead

@@ -72,6 +72,8 @@ export default function MoriInterface() {
         });
       } else if (data.command === 'control_youtube') {
         setMediaControl((current) => ({ actions: data.payload.actions || [], version: current.version + 1 }));
+      } else if (data.command === 'set_console') {
+        setShowConsole(Boolean(data.payload.open));
       } else if (data.command === 'reset') {
         if (currentUI === 'media' && mediaData?.mode === 'web' && webPreviewOpen) {
           setWebPreviewOpen(false);
@@ -208,7 +210,10 @@ export default function MoriInterface() {
                 onSearch={(query) => handleSend(mediaData.mode === 'youtube' ? `YouTubeで${query}を検索して` : `ネットで${query}を検索して`)}
                 onClose={() => setCurrentUI('core')}
                 webPreviewOpen={webPreviewOpen}
-                onOpenWebsite={() => setWebPreviewOpen(true)}
+                onOpenWebsite={() => {
+                  setShowConsole(false);
+                  setWebPreviewOpen(true);
+                }}
                 onCloseWebsite={() => setWebPreviewOpen(false)}
                 playerActions={mediaControl.actions}
                 controlVersion={mediaControl.version}
