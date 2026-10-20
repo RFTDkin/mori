@@ -145,17 +145,36 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } });
       streamRef.current = stream;
-      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+      // The <video> element is conditionally rendered based on isActive,
+      // so it may not exist yet. Poll briefly until it mounts.
+      const waitForVideo = () => new Promise<HTMLVideoElement | null>((resolve) => {
+        if (videoRef.current) return resolve(videoRef.current);
+        let tries = 0;
+        const id = setInterval(() => {
+          tries++;
+          if (videoRef.current) { clearInterval(id); resolve(videoRef.current); }
+          else if (tries > 50) { clearInterval(id); resolve(null); }
+        }, 50);
+      });
+      const video = await waitForVideo();
+      if (video) { video.srcObject = stream; await video.play(); }
+      else { console.warn('[Gesture] Video element not found after waiting'); }
       return true;
     } catch (error) { console.error('[Gesture] Camera access failed:', error); setDetectionStatus('error'); return false; }
   }, []);
+
+  const lastTimestampRef = useRef(0);
 
   const detectLoop = useCallback(() => {
     const video = videoRef.current;
     const landmarker = handLandmarkerRef.current;
     if (!video || !landmarker || video.readyState < 2) { animationFrameRef.current = requestAnimationFrame(detectLoop); return; }
     try {
-      const hands = (landmarker.detectForVideo(video, performance.now()).landmarks || []) as HandLandmark[][];
+      // detectForVideo requires a strictly increasing timestamp.
+      const now = performance.now();
+      if (now <= lastTimestampRef.current) { animationFrameRef.current = requestAnimationFrame(detectLoop); return; }
+      lastTimestampRef.current = now;
+      const hands = (landmarker.detectForVideo(video, now).landmarks || []) as HandLandmark[][];
       if (hands.length) { setLandmarks(hands[0]); setDetectionStatus('tracking'); analyseHands(hands); }
       else { setLandmarks(null); setDetectionStatus('searching'); pinchActiveRef.current = false; positionHistoryRef.current = []; }
     } catch (error) {
@@ -167,8 +186,11 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
 
   const start = useCallback(async () => {
     setDetectionStatus('starting');
-    if (!(await initHandLandmarker()) || !(await startCamera())) return;
+    if (!(await initHandLandmarker())) return;
+    // Render the <video> element first so startCamera can attach the stream.
     setIsActive(true);
+    if (!(await startCamera())) return;
+    lastTimestampRef.current = 0;
     animationFrameRef.current = requestAnimationFrame(detectLoop);
   }, [detectLoop, initHandLandmarker, startCamera]);
 
