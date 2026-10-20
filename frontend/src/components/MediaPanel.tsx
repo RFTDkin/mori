@@ -35,6 +35,7 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
   const [muted, setMuted] = useState(true);
   const [theaterMode, setTheaterMode] = useState(false);
   const playerRef = useRef<HTMLIFrameElement>(null);
+  const playerStageRef = useRef<HTMLDivElement>(null);
   const selected = data.results[selectedIndex];
 
   useEffect(() => {
@@ -53,9 +54,11 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
   };
 
   const fullscreen = () => {
-    const player = playerRef.current;
-    if (!player) return;
-    player.requestFullscreen?.().catch(() => setTheaterMode(true));
+    // Request fullscreen on our same-origin video stage instead of the cross-
+    // origin YouTube iframe. This produces true browser/monitor fullscreen.
+    const stage = playerStageRef.current;
+    if (!stage) return;
+    stage.requestFullscreen?.().catch(() => setTheaterMode(true));
   };
 
   useEffect(() => {
@@ -141,7 +144,7 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
       </form>
 
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(180px,1fr)_minmax(120px,0.65fr)] gap-3 overflow-y-auto p-3 md:grid-rows-1 md:grid-cols-[minmax(0,1.7fr)_minmax(220px,0.8fr)] md:overflow-hidden">
-        <div className="relative flex min-h-[180px] items-center justify-center overflow-hidden border border-neon-cyan/20 bg-black">
+        <div ref={playerStageRef} data-mori-youtube-stage className="relative flex min-h-[180px] items-center justify-center overflow-hidden border border-neon-cyan/20 bg-black">
           {data.mode === 'youtube' && selected?.id ? (
             <>
               <iframe

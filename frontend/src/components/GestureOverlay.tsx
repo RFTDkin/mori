@@ -13,6 +13,7 @@ interface GestureOverlayProps {
   isActive: boolean;
   currentGesture: GestureType;
   landmarks: HandLandmark[] | null;
+  detectionStatus: 'starting' | 'searching' | 'tracking' | 'error';
   videoRef: React.RefObject<HTMLVideoElement | null>;
   onToggle: () => void;
 }
@@ -28,11 +29,15 @@ const CONNECTIONS = [
 ];
 
 const GESTURE_LABELS: Record<GestureType, string> = {
-  swipe_left: '← スワイプ左（閉じる）',
-  swipe_right: 'スワイプ右 →（次の結果／ログ）',
-  pinch: '🤏 ピンチ（音量）',
-  open_hand: '✋ オープン（停止）',
-  thumbs_up: '👍 サムズアップ',
+  cursor_move: '',
+  click: '🤏 CLICK',
+  double_click: '🤏🤏 DOUBLE CLICK',
+  swipe_left: '← NEXT',
+  swipe_right: 'PREVIOUS →',
+  swipe_up: 'SCROLL ↓',
+  swipe_down: 'SCROLL ↑',
+  zoom_in: 'ZOOM IN +',
+  zoom_out: 'ZOOM OUT −',
   none: '',
 };
 
@@ -40,6 +45,7 @@ export default function GestureOverlay({
   isActive,
   currentGesture,
   landmarks,
+  detectionStatus,
   videoRef,
   onToggle,
 }: GestureOverlayProps) {
@@ -96,7 +102,7 @@ export default function GestureOverlay({
   return (
     <div className="absolute bottom-20 right-4 z-40 flex flex-col items-end gap-2">
       {/* ジェスチャー通知 */}
-      {currentGesture !== 'none' && (
+      {GESTURE_LABELS[currentGesture] && (
         <div className="px-4 py-2 bg-black/80 border border-neon-magenta rounded text-neon-magenta text-sm font-bold animate-pulse shadow-[0_0_20px_rgba(255,0,255,0.4)]">
           {GESTURE_LABELS[currentGesture]}
         </div>
@@ -107,8 +113,13 @@ export default function GestureOverlay({
         <div className="relative w-40 h-30 border border-neon-cyan/50 rounded overflow-hidden bg-black/60 shadow-[0_0_15px_rgba(0,240,255,0.2)]">
           {/* ステータスバー */}
           <div className="absolute top-0 left-0 right-0 bg-black/70 text-[9px] text-neon-green px-1.5 py-0.5 flex items-center gap-1 z-10">
-            <div className="w-1.5 h-1.5 rounded-full bg-neon-green animate-pulse" />
-            GESTURE_TRACK
+            <div className={`w-1.5 h-1.5 rounded-full ${detectionStatus === 'tracking' ? 'bg-neon-green animate-pulse' : detectionStatus === 'error' ? 'bg-red-500' : 'bg-yellow-300 animate-pulse'}`} />
+            {detectionStatus === 'tracking' ? 'HAND TRACKING' : detectionStatus === 'error' ? 'CAMERA / MODEL ERROR' : 'HAND SEARCHING'}
+          </div>
+
+          <div className="absolute bottom-0 left-0 right-0 z-10 bg-black/75 px-1.5 py-1 text-center text-[8px] leading-3 text-neon-cyan/80">
+            指差し=カーソル · つまむ=クリック<br />
+            両手つまみ=ズーム · 手を払う=移動/スクロール
           </div>
 
           <video
@@ -130,7 +141,9 @@ export default function GestureOverlay({
           {/* 手が検出されていない場合 */}
           {!landmarks && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-              <span className="text-[10px] text-neon-cyan/60">手を検出中...</span>
+              <span className="px-2 text-center text-[10px] text-neon-cyan/80">
+                {detectionStatus === 'error' ? '追跡エラー：一度OFF→ONしてください' : '手を明るい場所で中央にかざしてください'}
+              </span>
             </div>
           )}
         </div>

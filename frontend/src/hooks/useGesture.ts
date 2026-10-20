@@ -1,282 +1,187 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-// ジェスチャーの種類
-export type GestureType =
-  | 'swipe_left'    // 画面を閉じる
-  | 'swipe_right'   // メッセージログ表示
-  | 'pinch'         // ピンチ操作（音量調整）
-  | 'open_hand'     // 停止
-  | 'thumbs_up'     // 確認・OK
-  | 'none';
+export type GestureType = 'cursor_move' | 'click' | 'double_click' | 'swipe_left' | 'swipe_right' | 'swipe_up' | 'swipe_down' | 'zoom_in' | 'zoom_out' | 'none';
 
 export interface GestureEvent {
   type: GestureType;
   confidence: number;
   timestamp: number;
+  x?: number;
+  y?: number;
 }
 
-interface HandLandmark {
-  x: number;
-  y: number;
-  z: number;
-}
+interface HandLandmark { x: number; y: number; z: number; }
 
-// 指先とPIP関節のランドマークインデックス
-const FINGER_TIPS = [4, 8, 12, 16, 20];       // 親指, 人差し指, 中指, 薬指, 小指
-const FINGER_PIPS = [3, 6, 10, 14, 18];       // 各指のPIP関節
+const PINCH_THRESHOLD = 0.055;
+const SWIPE_DISTANCE = 0.16;
+const SWIPE_FRAMES = 9;
+const SWIPE_COOLDOWN = 600;
+const DOUBLE_CLICK_MS = 430;
+const ZOOM_DISTANCE = 0.08;
 
-// スワイプ検出用の設定
-const SWIPE_THRESHOLD = 0.15;     // 移動量の閾値（正規化座標）
-const SWIPE_FRAMES = 8;           // 何フレームで判定するか
-const GESTURE_COOLDOWN = 1000;    // ジェスチャー間のクールダウン（ms）
-const PINCH_THRESHOLD = 0.06;     // ピンチ判定の距離閾値
+const distance = (a: HandLandmark, b: HandLandmark) => Math.hypot(a.x - b.x, a.y - b.y);
+const isPinching = (hand: HandLandmark[]) => distance(hand[4], hand[8]) < PINCH_THRESHOLD;
 
-export default function useGesture(
-  onGesture: (gesture: GestureEvent) => void,
-  enabled: boolean = false
-) {
+/** Point to move, pinch to click, pinch twice to double-click; use two pinched hands to zoom. */
+export default function useGesture(onGesture: (gesture: GestureEvent) => void, enabled = false) {
   const [isActive, setIsActive] = useState(false);
   const [currentGesture, setCurrentGesture] = useState<GestureType>('none');
   const [landmarks, setLandmarks] = useState<HandLandmark[] | null>(null);
-
+  const [detectionStatus, setDetectionStatus] = useState<'starting' | 'searching' | 'tracking' | 'error'>('starting');
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const handLandmarkerRef = useRef<any>(null);
   const animationFrameRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-
   const onGestureRef = useRef(onGesture);
   const positionHistoryRef = useRef<{ x: number; y: number; time: number }[]>([]);
-  const lastGestureTimeRef = useRef(0);
-  const lastPinchValueRef = useRef<number | null>(null);
+  const pinchActiveRef = useRef(false);
+  const lastClickRef = useRef(0);
+  const lastSwipeRef = useRef(0);
+  const zoomBaselineRef = useRef<number | null>(null);
+  const lastCursorRef = useRef(0);
+  const labelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    onGestureRef.current = onGesture;
-  }, [onGesture]);
+  useEffect(() => { onGestureRef.current = onGesture; }, [onGesture]);
 
-  // 指が伸びているかチェック
-  const isFingerExtended = useCallback((landmarks: HandLandmark[], fingerIndex: number): boolean => {
-    const tipIdx = FINGER_TIPS[fingerIndex];
-    const pipIdx = FINGER_PIPS[fingerIndex];
-
-    if (fingerIndex === 0) {
-      // 親指は横方向で判定
-      return Math.abs(landmarks[tipIdx].x - landmarks[pipIdx].x) > 0.04;
+  const emit = useCallback((type: GestureType, details: Partial<GestureEvent> = {}, transient = true) => {
+    const now = Date.now();
+    if (transient) {
+      setCurrentGesture(type);
+      if (labelTimerRef.current) clearTimeout(labelTimerRef.current);
+      labelTimerRef.current = setTimeout(() => setCurrentGesture('none'), 700);
     }
-    // 他の指はy座標（上方向が小さい）
-    return landmarks[tipIdx].y < landmarks[pipIdx].y;
+    onGestureRef.current({ type, confidence: 0.9, timestamp: now, ...details });
   }, []);
 
-  // ジェスチャー認識ロジック
-  const detectGesture = useCallback((handLandmarks: HandLandmark[]): GestureType => {
+  const analyseHands = useCallback((hands: HandLandmark[][]) => {
     const now = Date.now();
+    const primary = hands[0];
+    if (!primary) return;
 
-    // クールダウン中は none
-    if (now - lastGestureTimeRef.current < GESTURE_COOLDOWN) {
-      return 'none';
+    // Match the mirrored camera preview so pointing feels natural.
+    const x = 1 - primary[8].x;
+    const y = primary[8].y;
+    if (now - lastCursorRef.current > 32) {
+      lastCursorRef.current = now;
+      emit('cursor_move', { x, y }, false);
     }
 
-    const wrist = handLandmarks[0];
-    const thumbTip = handLandmarks[4];
-    const indexTip = handLandmarks[8];
-
-    // --- ピンチ検出 ---
-    const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
-    if (pinchDist < PINCH_THRESHOLD) {
-      lastGestureTimeRef.current = now;
-      lastPinchValueRef.current = pinchDist;
-      return 'pinch';
-    }
-
-    // --- 全指の状態チェック ---
-    const extendedFingers = FINGER_TIPS.map((_, i) => isFingerExtended(handLandmarks, i));
-    const extendedCount = extendedFingers.filter(Boolean).length;
-
-    // オープンハンド（パー）: 全指伸ばし
-    if (extendedCount >= 4) {
-      // スワイプ検出: 手のひらの移動を追跡
-      const history = positionHistoryRef.current;
-      history.push({ x: wrist.x, y: wrist.y, time: now });
-
-      // 古い履歴を削除
-      while (history.length > SWIPE_FRAMES) {
-        history.shift();
+    // Two pinched hands avoid clashing with the one-hand click gesture.
+    if (hands.length >= 2 && isPinching(hands[0]) && isPinching(hands[1])) {
+      const center = (hand: HandLandmark[]) => ({ x: (hand[4].x + hand[8].x) / 2, y: (hand[4].y + hand[8].y) / 2, z: 0 });
+      const handDistance = distance(center(hands[0]), center(hands[1]));
+      const baseline = zoomBaselineRef.current;
+      if (baseline === null) zoomBaselineRef.current = handDistance;
+      else if (Math.abs(handDistance - baseline) > ZOOM_DISTANCE) {
+        emit(handDistance > baseline ? 'zoom_in' : 'zoom_out');
+        zoomBaselineRef.current = handDistance;
       }
-
-      if (history.length >= SWIPE_FRAMES) {
-        const dx = history[history.length - 1].x - history[0].x;
-        const timeDiff = history[history.length - 1].time - history[0].time;
-
-        if (timeDiff < 800 && Math.abs(dx) > SWIPE_THRESHOLD) {
-          positionHistoryRef.current = [];
-          lastGestureTimeRef.current = now;
-          return dx < 0 ? 'swipe_left' : 'swipe_right';
-        }
-      }
-
-      // スワイプでなければオープンハンド
-      if (extendedCount === 5) {
-        lastGestureTimeRef.current = now;
-        return 'open_hand';
-      }
+      pinchActiveRef.current = true;
+      positionHistoryRef.current = [];
+      return;
     }
+    zoomBaselineRef.current = null;
 
-    // サムズアップ: 親指だけ伸ばし
-    if (extendedFingers[0] && extendedCount === 1) {
-      // 親指が上を向いているか
-      if (thumbTip.y < handLandmarks[3].y) {
-        lastGestureTimeRef.current = now;
-        return 'thumbs_up';
+    if (isPinching(primary)) {
+      if (!pinchActiveRef.current) {
+        pinchActiveRef.current = true;
+        const isDoubleClick = now - lastClickRef.current < DOUBLE_CLICK_MS;
+        lastClickRef.current = now;
+        emit(isDoubleClick ? 'double_click' : 'click', { x, y });
       }
+      positionHistoryRef.current = [];
+      return;
     }
+    pinchActiveRef.current = false;
 
-    positionHistoryRef.current.push({ x: wrist.x, y: wrist.y, time: now });
-    while (positionHistoryRef.current.length > SWIPE_FRAMES) {
-      positionHistoryRef.current.shift();
-    }
+    // An open moving hand works like a phone swipe: left/right navigates and up/down scrolls.
+    const history = positionHistoryRef.current;
+    history.push({ x: primary[0].x, y: primary[0].y, time: now });
+    while (history.length > SWIPE_FRAMES) history.shift();
+    if (history.length < SWIPE_FRAMES || now - lastSwipeRef.current < SWIPE_COOLDOWN) return;
+    const first = history[0];
+    const last = history[history.length - 1];
+    const dx = last.x - first.x;
+    const dy = last.y - first.y;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_DISTANCE || last.time - first.time > 850) return;
+    lastSwipeRef.current = now;
+    positionHistoryRef.current = [];
+    if (Math.abs(dx) > Math.abs(dy)) emit(dx < 0 ? 'swipe_left' : 'swipe_right');
+    else emit(dy < 0 ? 'swipe_up' : 'swipe_down');
+  }, [emit]);
 
-    return 'none';
-  }, [isFingerExtended]);
-
-  // MediaPipe HandLandmarker の初期化
   const initHandLandmarker = useCallback(async () => {
     try {
       const vision = await import('@mediapipe/tasks-vision');
       const { HandLandmarker, FilesetResolver } = vision;
-
-      const filesetResolver = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
-      );
-
-      const handLandmarker = await HandLandmarker.createFromOptions(filesetResolver, {
-        baseOptions: {
-          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-          delegate: 'GPU',
-        },
-        runningMode: 'VIDEO',
-        numHands: 1,
-        minHandDetectionConfidence: 0.5,
-        minHandPresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-      });
-
-      handLandmarkerRef.current = handLandmarker;
+      // Keep the WASM runtime on the same version as package.json. Using "latest"
+      // can silently mismatch the locally installed API and leave tracking idle.
+      const fileset = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm');
+      const options = {
+        baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate: 'GPU' as const },
+        runningMode: 'VIDEO' as const, numHands: 2,
+        // 0.5 was too strict for many laptop cameras, especially indoors.
+        minHandDetectionConfidence: 0.2, minHandPresenceConfidence: 0.2, minTrackingConfidence: 0.2,
+      };
+      try {
+        handLandmarkerRef.current = await HandLandmarker.createFromOptions(fileset, options);
+      } catch (gpuError) {
+        // Some integrated graphics drivers initialise WebGL but cannot run this
+        // model reliably. CPU is slower but much more dependable for a 640px feed.
+        console.warn('[Gesture] GPU unavailable; switching to CPU tracking.', gpuError);
+        handLandmarkerRef.current = await HandLandmarker.createFromOptions(fileset, {
+          ...options,
+          baseOptions: { ...options.baseOptions, delegate: 'CPU' as const },
+        });
+      }
       return true;
-    } catch (error) {
-      console.error('[Gesture] Failed to initialize HandLandmarker:', error);
-      return false;
-    }
+    } catch (error) { console.error('[Gesture] Failed to initialize HandLandmarker:', error); setDetectionStatus('error'); return false; }
   }, []);
 
-  // カメラ起動
   const startCamera = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 320, height: 240, facingMode: 'user' },
-      });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } });
       streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
       return true;
-    } catch (error) {
-      console.error('[Gesture] Camera access failed:', error);
-      return false;
-    }
+    } catch (error) { console.error('[Gesture] Camera access failed:', error); setDetectionStatus('error'); return false; }
   }, []);
 
-  // フレームごとの検出ループ
   const detectLoop = useCallback(() => {
     const video = videoRef.current;
-    const handLandmarker = handLandmarkerRef.current;
-
-    if (!video || !handLandmarker || video.readyState < 2) {
-      animationFrameRef.current = requestAnimationFrame(detectLoop);
-      return;
+    const landmarker = handLandmarkerRef.current;
+    if (!video || !landmarker || video.readyState < 2) { animationFrameRef.current = requestAnimationFrame(detectLoop); return; }
+    try {
+      const hands = (landmarker.detectForVideo(video, performance.now()).landmarks || []) as HandLandmark[][];
+      if (hands.length) { setLandmarks(hands[0]); setDetectionStatus('tracking'); analyseHands(hands); }
+      else { setLandmarks(null); setDetectionStatus('searching'); pinchActiveRef.current = false; positionHistoryRef.current = []; }
+    } catch (error) {
+      console.error('[Gesture] Hand detection failed:', error);
+      setDetectionStatus('error');
     }
-
-    const results = handLandmarker.detectForVideo(video, performance.now());
-
-    if (results.landmarks && results.landmarks.length > 0) {
-      const hand = results.landmarks[0] as HandLandmark[];
-      setLandmarks(hand);
-
-      const gesture = detectGesture(hand);
-      if (gesture !== 'none') {
-        setCurrentGesture(gesture);
-        onGestureRef.current({
-          type: gesture,
-          confidence: 0.9,
-          timestamp: Date.now(),
-        });
-
-        // 表示をリセット
-        setTimeout(() => setCurrentGesture('none'), 800);
-      }
-    } else {
-      setLandmarks(null);
-    }
-
     animationFrameRef.current = requestAnimationFrame(detectLoop);
-  }, [detectGesture]);
+  }, [analyseHands]);
 
-  // 起動・停止
   const start = useCallback(async () => {
-    const landmarkerOk = await initHandLandmarker();
-    if (!landmarkerOk) return;
-
-    const cameraOk = await startCamera();
-    if (!cameraOk) return;
-
+    setDetectionStatus('starting');
+    if (!(await initHandLandmarker()) || !(await startCamera())) return;
     setIsActive(true);
     animationFrameRef.current = requestAnimationFrame(detectLoop);
-  }, [initHandLandmarker, startCamera, detectLoop]);
+  }, [detectLoop, initHandLandmarker, startCamera]);
 
   const stop = useCallback(() => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-
-    if (handLandmarkerRef.current) {
-      handLandmarkerRef.current.close();
-      handLandmarkerRef.current = null;
-    }
-
-    setIsActive(false);
-    setLandmarks(null);
-    setCurrentGesture('none');
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    animationFrameRef.current = null;
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+    handLandmarkerRef.current?.close(); handLandmarkerRef.current = null;
+    if (labelTimerRef.current) clearTimeout(labelTimerRef.current);
+    setIsActive(false); setLandmarks(null); setCurrentGesture('none'); setDetectionStatus('starting');
   }, []);
 
-  // enabled プロパティに応じて起動/停止
-  useEffect(() => {
-    if (enabled) {
-      start();
-    } else {
-      stop();
-    }
-
-    return () => {
-      stop();
-    };
-  }, [enabled]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return {
-    isActive,
-    currentGesture,
-    landmarks,
-    videoRef,
-    canvasRef,
-    start,
-    stop,
-  };
+  useEffect(() => { if (enabled) start(); else stop(); return stop; }, [enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  return { isActive, currentGesture, landmarks, detectionStatus, videoRef, canvasRef, start, stop };
 }

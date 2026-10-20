@@ -152,24 +152,7 @@ def get_weather(location: str) -> Dict[str, Any]:
 def get_stock_history(symbol: str, days: int = 30) -> Dict[str, Any]:
     """Get daily closing prices from Yahoo Finance's public chart endpoint."""
     try:
-        days = max(1, min(int(days), 365))
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(days=days + 10)  # Preserve 30 trading days through weekends/holidays.
-        url = (
-            "https://query1.finance.yahoo.com/v8/finance/chart/"
-            f"{quote(symbol.upper())}?period1={int(start.timestamp())}&period2={int(end.timestamp())}&interval=1d"
-        )
-        result = _get_json(url).get("chart", {}).get("result", [])
-        if not result:
-            return {"text": f"{symbol.upper()}の株価データを取得できませんでした。"}
-        series = result[0]
-        timestamps = series.get("timestamp") or []
-        closes = (series.get("indicators", {}).get("quote") or [{}])[0].get("close") or []
-        points = [
-            (datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%m/%d"), round(float(close), 2))
-            for timestamp, close in zip(timestamps, closes)
-            if close is not None
-        ][-days:]
+        points = _get_stock_points(symbol, days)
         if not points:
             return {"text": f"{symbol.upper()}の有効な終値データを取得できませんでした。"}
         labels, values = zip(*points)
@@ -183,6 +166,67 @@ def get_stock_history(symbol: str, days: int = 30) -> Dict[str, Any]:
         }
     except Exception as e:
         return {"text": f"株価データの取得に失敗しました: {str(e)}"}
+
+
+def _get_stock_points(symbol: str, days: int) -> List[tuple[str, float]]:
+    """Return dated daily closes; shared by the single-stock and comparison tools."""
+    days = max(1, min(int(days), 365))
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(days=days + 14)
+    url = (
+        "https://query1.finance.yahoo.com/v8/finance/chart/"
+        f"{quote(symbol.upper())}?period1={int(start.timestamp())}&period2={int(end.timestamp())}&interval=1d"
+    )
+    result = _get_json(url).get("chart", {}).get("result", [])
+    if not result:
+        return []
+    series = result[0]
+    timestamps = series.get("timestamp") or []
+    closes = (series.get("indicators", {}).get("quote") or [{}])[0].get("close") or []
+    return [
+        (datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%m/%d"), round(float(close), 2))
+        for timestamp, close in zip(timestamps, closes)
+        if close is not None
+    ][-days:]
+
+
+def get_stock_comparison(symbols: List[str], days: int = 30) -> Dict[str, Any]:
+    """Create a multi-line comparison chart for two or more listed companies."""
+    try:
+        unique_symbols = list(dict.fromkeys(symbol.upper().strip() for symbol in symbols if symbol.strip()))[:5]
+        if len(unique_symbols) < 2:
+            return {"text": "比較には2つ以上の銘柄が必要です。"}
+        point_sets = {symbol: _get_stock_points(symbol, days) for symbol in unique_symbols}
+        if any(not points for points in point_sets.values()):
+            missing = ", ".join(symbol for symbol, points in point_sets.items() if not points)
+            return {"text": f"次の銘柄の株価データを取得できませんでした: {missing}"}
+
+        # Compare only dates traded by all companies, so each point shares one x-axis.
+        common_dates = set.intersection(*(set(date for date, _ in points) for points in point_sets.values()))
+        labels = [date for date, _ in point_sets[unique_symbols[0]] if date in common_dates]
+        labels = labels[-max(1, min(int(days), 365)):]
+        series = []
+        for symbol in unique_symbols:
+            by_date = dict(point_sets[symbol])
+            series.append({"name": symbol, "values": [by_date[date] for date in labels]})
+        if not labels:
+            return {"text": "共通する取引日を見つけられませんでした。"}
+        title = f"{' vs '.join(unique_symbols)}：直近{len(labels)}営業日の終値"
+        return {
+            "text": f"{', '.join(unique_symbols)}の株価比較グラフを表示しました。",
+            "ui_command": {
+                "type": "chart",
+                "data": {
+                    "chart_type": "line",
+                    "title": title,
+                    "labels": labels,
+                    "values": series[0]["values"],
+                    "series": series,
+                },
+            },
+        }
+    except Exception as e:
+        return {"text": f"株価比較データの取得に失敗しました: {str(e)}"}
 
 def close_ui() -> Dict[str, Any]:
     """Command to return to default UI state."""
@@ -211,6 +255,21 @@ TOOLS_SCHEMA = [
                 "required": ["query"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_stock_comparison",
+            "description": "2社以上の株価を同じ折れ線グラフで比較表示します。複数の企業名・銘柄名が一緒に指定された株価グラフ依頼に必ず使用します。Tesla=TSLA、NVIDIA=NVDA。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbols": {"type": "array", "items": {"type": "string"}, "description": "比較するティッカーの配列。例: [\"NVDA\", \"TSLA\"]"},
+                    "days": {"type": "integer", "description": "直近営業日数。例: 30"},
+                },
+                "required": ["symbols", "days"],
+            },
+        },
     },
     {
         "type": "function",
@@ -331,6 +390,8 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return get_weather(arguments.get("location", ""))
     elif name == "get_stock_history":
         return get_stock_history(arguments.get("symbol", ""), arguments.get("days", 30))
+    elif name == "get_stock_comparison":
+        return get_stock_comparison(arguments.get("symbols", []), arguments.get("days", 30))
     elif name == "close_ui":
         return close_ui()
     else:

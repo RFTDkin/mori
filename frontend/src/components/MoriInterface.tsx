@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CoreVisual from './CoreVisual';
 import ChartDisplay from './ChartDisplay';
 import WeatherDisplay from './WeatherDisplay';
@@ -29,11 +29,16 @@ export default function MoriInterface() {
   const [webPreviewOpen, setWebPreviewOpen] = useState(false);
   const [mediaControl, setMediaControl] = useState({ actions: [] as string[], version: 0 });
   const [chartData, setChartData] = useState<any>(null);
+  const [chartPages, setChartPages] = useState<any[]>([]);
+  const [chartIndex, setChartIndex] = useState(0);
   const [weatherData, setWeatherData] = useState<any>(null);
   const [time, setTime] = useState<string>('');
   const [gestureEnabled, setGestureEnabled] = useState(false);
   // Keep the command console out of the way until the user explicitly opens it.
   const [showConsole, setShowConsole] = useState(false);
+  const [gestureZoom, setGestureZoom] = useState(1);
+  const [virtualCursor, setVirtualCursor] = useState({ x: 0.5, y: 0.5, visible: false });
+  const virtualCursorRef = useRef({ x: 0, y: 0 });
 
   const { isConnected, sendMessage } = useWebSocket('ws://localhost:8000/ws/chat', (data) => {
     if (data.type === 'text_response') {
@@ -53,6 +58,11 @@ export default function MoriInterface() {
         setCurrentUI('media');
       } else if (data.command === 'show_chart') {
         setChartData(data.payload);
+        setChartPages((pages) => {
+          const next = [...pages, data.payload];
+          setChartIndex(next.length - 1);
+          return next;
+        });
         setCurrentUI('chart');
       } else if (data.command === 'show_weather') {
         setWeatherData(data.payload);
@@ -89,47 +99,71 @@ export default function MoriInterface() {
     () => {} // wake word detected callback
   );
 
-  // ジェスチャーイベント処理
+  const clickAtCursor = useCallback((isDoubleClick: boolean) => {
+    const { x, y } = virtualCursorRef.current;
+    const rawTarget = document.elementFromPoint(x, y);
+    const target = rawTarget?.closest<HTMLElement>('button, a, input, textarea, select, [role="button"]');
+    if (!target) return;
+    target.focus?.();
+    target.click();
+    if (isDoubleClick) target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y }));
+  }, []);
+
+  const scrollAtCursor = useCallback((amount: number) => {
+    const { x, y } = virtualCursorRef.current;
+    let element = document.elementFromPoint(x, y) as HTMLElement | null;
+    while (element) {
+      if (element.scrollHeight > element.clientHeight + 2) {
+        element.scrollBy({ top: amount, behavior: 'smooth' });
+        return;
+      }
+      element = element.parentElement;
+    }
+    window.scrollBy({ top: amount, behavior: 'smooth' });
+  }, []);
+
+  // Touch-like hand controls: point, pinch, swipe, and two-hand zoom.
   const handleGesture = useCallback((gesture: GestureEvent) => {
     switch (gesture.type) {
-      case 'swipe_left':
-        // 現在表示中のメディア・チャート画面を閉じる
-        if (currentUI !== 'core') {
-          setCurrentUI('core');
-        }
+      case 'cursor_move': {
+        const x = Math.min(Math.max(gesture.x ?? 0.5, 0), 1) * window.innerWidth;
+        const y = Math.min(Math.max(gesture.y ?? 0.5, 0), 1) * window.innerHeight;
+        virtualCursorRef.current = { x, y };
+        setVirtualCursor({ x: x / window.innerWidth, y: y / window.innerHeight, visible: true });
         break;
+      }
+      case 'click':
+        clickAtCursor(false);
+        break;
+      case 'double_click':
+        clickAtCursor(true);
+        break;
+      case 'swipe_left':
       case 'swipe_right':
         if (currentUI === 'media' && mediaData?.results.length) {
-          setMediaIndex((index) => (index + 1) % mediaData.results.length);
-        } else {
-          setShowConsole(prev => !prev);
+          const direction = gesture.type === 'swipe_left' ? 1 : -1;
+          setMediaIndex((index) => (index + direction + mediaData.results.length) % mediaData.results.length);
+        } else if (currentUI === 'chart' && chartPages.length > 1) {
+          const direction = gesture.type === 'swipe_left' ? 1 : -1;
+          setChartIndex((index) => (index + direction + chartPages.length) % chartPages.length);
         }
         break;
-      case 'open_hand':
-        // TTS停止 + リスニング停止
-        if (typeof window !== 'undefined' && window.speechSynthesis?.speaking) {
-          window.speechSynthesis.cancel();
-        }
-        if (isListening) {
-          stopListening();
-        }
+      case 'swipe_up':
+        scrollAtCursor(420);
         break;
-      case 'thumbs_up':
-        // リスニング開始
-        if (!isListening) {
-          startListening();
-        }
+      case 'swipe_down':
+        scrollAtCursor(-420);
         break;
-      case 'pinch':
-        // ピンチで現在の画面を閉じる
-        if (currentUI !== 'core') {
-          setCurrentUI('core');
-        }
+      case 'zoom_in':
+        setGestureZoom((zoom) => Math.min(1.5, Number((zoom + 0.1).toFixed(2))));
+        break;
+      case 'zoom_out':
+        setGestureZoom((zoom) => Math.max(0.75, Number((zoom - 0.1).toFixed(2))));
         break;
     }
-  }, [currentUI, mediaData, isListening, stopListening, startListening]);
+  }, [chartPages.length, clickAtCursor, currentUI, mediaData, scrollAtCursor]);
 
-  const { isActive: gestureActive, currentGesture, landmarks, videoRef: gestureVideoRef } = useGesture(
+  const { isActive: gestureActive, currentGesture, landmarks, detectionStatus, videoRef: gestureVideoRef } = useGesture(
     handleGesture,
     gestureEnabled
   );
@@ -155,6 +189,12 @@ export default function MoriInterface() {
 
   const handleSend = (text: string) => {
     if (!text.trim()) return;
+    // When this originates from pressing SEND, this synchronous request retains
+    // the browser's user-activation token and can enter true fullscreen.
+    if (currentUI === 'media' && mediaData?.mode === 'youtube' && /全画面|フルスクリーン|fullscreen/i.test(text)) {
+      const stage = document.querySelector<HTMLElement>('[data-mori-youtube-stage]');
+      stage?.requestFullscreen?.().catch(() => {});
+    }
     addMessage('user', text);
     sendMessage({ type: 'user_message', content: text });
   };
@@ -197,7 +237,7 @@ export default function MoriInterface() {
         {showConsole && <MessageLog messages={messages} />}
         
         <div className="flex-1 flex flex-col relative z-10 p-6">
-          <div className="flex-1 flex items-center justify-center relative">
+          <div className="flex-1 flex items-center justify-center relative" style={webPreviewOpen ? undefined : { transform: `scale(${gestureZoom})`, transformOrigin: 'center center', transition: 'transform 180ms ease-out' }}>
             {currentUI === 'core' && (
               <CoreVisual status={isSpeaking ? 'speaking' : isListening ? 'listening' : 'idle'} />
             )}
@@ -220,8 +260,8 @@ export default function MoriInterface() {
               />
             )}
             
-            {currentUI === 'chart' && chartData && (
-              <ChartDisplay data={chartData} onClose={() => setCurrentUI('core')} />
+            {currentUI === 'chart' && (chartPages[chartIndex] || chartData) && (
+              <ChartDisplay data={chartPages[chartIndex] || chartData} onClose={() => setCurrentUI('core')} />
             )}
 
             {currentUI === 'weather' && weatherData && (
@@ -249,12 +289,21 @@ export default function MoriInterface() {
           {showConsole ? 'HIDE CONSOLE' : 'COMMAND CONSOLE'}
         </button>
       </div>
+
+      {gestureActive && virtualCursor.visible && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed z-[100] h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-neon-magenta bg-neon-magenta/15 shadow-[0_0_14px_rgba(255,0,255,0.9)]"
+          style={{ left: `${virtualCursor.x * 100}%`, top: `${virtualCursor.y * 100}%` }}
+        />
+      )}
       
       {/* Gesture Overlay */}
       <GestureOverlay
         isActive={gestureActive}
         currentGesture={currentGesture}
         landmarks={landmarks}
+        detectionStatus={detectionStatus}
         videoRef={gestureVideoRef}
         onToggle={() => setGestureEnabled(prev => !prev)}
       />
