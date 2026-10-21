@@ -3,6 +3,7 @@ from groq import AsyncGroq
 import asyncio
 import json
 import os
+import re
 from .config import settings
 from .tools import TOOLS_SCHEMA, execute_tool
 from .intents import classify_intent
@@ -14,6 +15,27 @@ class MoriAgent:
         self.history = [{"role": "system", "content": settings.SYSTEM_PROMPT}]
 
     async def process_message(self, user_message: str) -> Dict[str, Any]:
+        # Make multi-stock chart requests deterministic: the display must retain
+        # one chart per company unless the user explicitly asks for one combined chart.
+        normalized = user_message.lower()
+        company_aliases = {
+            "TSLA": ("tesla", "テスラ"),
+            "NVDA": ("nvidia", "エヌビディア", "エヌビディア"),
+            "AAPL": ("apple", "アップル"),
+            "MSFT": ("microsoft", "マイクロソフト"),
+        }
+        symbols = [symbol for symbol, aliases in company_aliases.items() if any(alias in normalized for alias in aliases)]
+        if len(symbols) >= 2 and any(word in user_message for word in ("株価", "株", "グラフ", "chart")):
+            days_match = re.search(r"(\d+)\s*日", user_message)
+            days = int(days_match.group(1)) if days_match else 30
+            combined = any(phrase in normalized for phrase in ("同一グラフ", "同じグラフ", "1枚のグラフ", "一枚のグラフ", "比較して"))
+            tool_result = await asyncio.to_thread(
+                execute_tool,
+                "get_stock_comparison",
+                {"symbols": symbols, "days": days, "combined": combined},
+            )
+            return {**tool_result, "tools_used": ["get_stock_comparison"]}
+
         intent = classify_intent(user_message)
         if intent:
             if intent.action == "open_youtube":

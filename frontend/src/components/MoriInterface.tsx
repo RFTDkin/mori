@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import CoreVisual from './CoreVisual';
 import ChartDisplay from './ChartDisplay';
 import WeatherDisplay from './WeatherDisplay';
@@ -36,9 +36,6 @@ export default function MoriInterface() {
   const [gestureEnabled, setGestureEnabled] = useState(false);
   // Keep the command console out of the way until the user explicitly opens it.
   const [showConsole, setShowConsole] = useState(false);
-  const [gestureZoom, setGestureZoom] = useState(1);
-  const [virtualCursor, setVirtualCursor] = useState({ x: 0.5, y: 0.5, visible: false });
-  const virtualCursorRef = useRef({ x: 0, y: 0 });
 
   const { isConnected, sendMessage } = useWebSocket('ws://localhost:8000/ws/chat', (data) => {
     if (data.type === 'text_response') {
@@ -64,6 +61,14 @@ export default function MoriInterface() {
           return next;
         });
         setCurrentUI('chart');
+      } else if (data.command === 'show_chart_collection') {
+        const pages = data.payload.pages || [];
+        if (pages.length) {
+          setChartData(pages[0]);
+          setChartPages(pages);
+          setChartIndex(0);
+          setCurrentUI('chart');
+        }
       } else if (data.command === 'show_weather') {
         setWeatherData(data.payload);
         setCurrentUI('weather');
@@ -99,45 +104,9 @@ export default function MoriInterface() {
     () => {} // wake word detected callback
   );
 
-  const clickAtCursor = useCallback((isDoubleClick: boolean) => {
-    const { x, y } = virtualCursorRef.current;
-    const rawTarget = document.elementFromPoint(x, y);
-    const target = rawTarget?.closest<HTMLElement>('button, a, input, textarea, select, [role="button"]');
-    if (!target) return;
-    target.focus?.();
-    target.click();
-    if (isDoubleClick) target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: x, clientY: y }));
-  }, []);
-
-  const scrollAtCursor = useCallback((amount: number) => {
-    const { x, y } = virtualCursorRef.current;
-    let element = document.elementFromPoint(x, y) as HTMLElement | null;
-    while (element) {
-      if (element.scrollHeight > element.clientHeight + 2) {
-        element.scrollBy({ top: amount, behavior: 'smooth' });
-        return;
-      }
-      element = element.parentElement;
-    }
-    window.scrollBy({ top: amount, behavior: 'smooth' });
-  }, []);
-
-  // Touch-like hand controls: point, pinch, swipe, and two-hand zoom.
+  // Presentation-style hand controls: open-palm left/right, fist to dismiss.
   const handleGesture = useCallback((gesture: GestureEvent) => {
     switch (gesture.type) {
-      case 'cursor_move': {
-        const x = Math.min(Math.max(gesture.x ?? 0.5, 0), 1) * window.innerWidth;
-        const y = Math.min(Math.max(gesture.y ?? 0.5, 0), 1) * window.innerHeight;
-        virtualCursorRef.current = { x, y };
-        setVirtualCursor({ x: x / window.innerWidth, y: y / window.innerHeight, visible: true });
-        break;
-      }
-      case 'click':
-        clickAtCursor(false);
-        break;
-      case 'double_click':
-        clickAtCursor(true);
-        break;
       case 'swipe_left':
       case 'swipe_right':
         if (currentUI === 'media' && mediaData?.results.length) {
@@ -148,20 +117,12 @@ export default function MoriInterface() {
           setChartIndex((index) => (index + direction + chartPages.length) % chartPages.length);
         }
         break;
-      case 'swipe_up':
-        scrollAtCursor(420);
-        break;
-      case 'swipe_down':
-        scrollAtCursor(-420);
-        break;
-      case 'zoom_in':
-        setGestureZoom((zoom) => Math.min(1.5, Number((zoom + 0.1).toFixed(2))));
-        break;
-      case 'zoom_out':
-        setGestureZoom((zoom) => Math.max(0.75, Number((zoom - 0.1).toFixed(2))));
+      case 'fist':
+        setWebPreviewOpen(false);
+        setCurrentUI('core');
         break;
     }
-  }, [chartPages.length, clickAtCursor, currentUI, mediaData, scrollAtCursor]);
+  }, [chartPages.length, currentUI, mediaData]);
 
   const { isActive: gestureActive, currentGesture, landmarks, detectionStatus, videoRef: gestureVideoRef } = useGesture(
     handleGesture,
@@ -237,7 +198,7 @@ export default function MoriInterface() {
         {showConsole && <MessageLog messages={messages} />}
         
         <div className="flex-1 flex flex-col relative z-10 p-6">
-          <div className="flex-1 flex items-center justify-center relative" style={webPreviewOpen ? undefined : { transform: `scale(${gestureZoom})`, transformOrigin: 'center center', transition: 'transform 180ms ease-out' }}>
+          <div className="flex-1 flex items-center justify-center relative">
             {currentUI === 'core' && (
               <CoreVisual status={isSpeaking ? 'speaking' : isListening ? 'listening' : 'idle'} />
             )}
@@ -261,7 +222,16 @@ export default function MoriInterface() {
             )}
             
             {currentUI === 'chart' && (chartPages[chartIndex] || chartData) && (
-              <ChartDisplay data={chartPages[chartIndex] || chartData} onClose={() => setCurrentUI('core')} />
+              <ChartDisplay
+                data={chartPages[chartIndex] || chartData}
+                onClose={() => setCurrentUI('core')}
+                pageIndex={chartIndex}
+                pageCount={chartPages.length || 1}
+                onNavigate={(direction) => setChartIndex((index) => {
+                  const count = chartPages.length || 1;
+                  return (index + direction + count) % count;
+                })}
+              />
             )}
 
             {currentUI === 'weather' && weatherData && (
@@ -290,13 +260,6 @@ export default function MoriInterface() {
         </button>
       </div>
 
-      {gestureActive && virtualCursor.visible && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed z-[100] h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-neon-magenta bg-neon-magenta/15 shadow-[0_0_14px_rgba(255,0,255,0.9)]"
-          style={{ left: `${virtualCursor.x * 100}%`, top: `${virtualCursor.y * 100}%` }}
-        />
-      )}
       
       {/* Gesture Overlay */}
       <GestureOverlay

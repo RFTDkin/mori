@@ -190,8 +190,8 @@ def _get_stock_points(symbol: str, days: int) -> List[tuple[str, float]]:
     ][-days:]
 
 
-def get_stock_comparison(symbols: List[str], days: int = 30) -> Dict[str, Any]:
-    """Create a multi-line comparison chart for two or more listed companies."""
+def get_stock_comparison(symbols: List[str], days: int = 30, combined: bool = False) -> Dict[str, Any]:
+    """Create separate charts by default, or one multi-line comparison on request."""
     try:
         unique_symbols = list(dict.fromkeys(symbol.upper().strip() for symbol in symbols if symbol.strip()))[:5]
         if len(unique_symbols) < 2:
@@ -211,6 +211,21 @@ def get_stock_comparison(symbols: List[str], days: int = 30) -> Dict[str, Any]:
             series.append({"name": symbol, "values": [by_date[date] for date in labels]})
         if not labels:
             return {"text": "共通する取引日を見つけられませんでした。"}
+        if not combined:
+            pages = [
+                {
+                    "chart_type": "line",
+                    "title": f"{item['name']}：直近{len(labels)}営業日の終値",
+                    "labels": labels,
+                    "values": item["values"],
+                }
+                for item in series
+            ]
+            return {
+                "text": f"{', '.join(unique_symbols)}の株価グラフを{len(pages)}枚に分けて表示しました。",
+                "ui_command": {"type": "chart_collection", "data": {"pages": pages}},
+            }
+
         title = f"{' vs '.join(unique_symbols)}：直近{len(labels)}営業日の終値"
         return {
             "text": f"{', '.join(unique_symbols)}の株価比較グラフを表示しました。",
@@ -260,12 +275,13 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "get_stock_comparison",
-            "description": "2社以上の株価を同じ折れ線グラフで比較表示します。複数の企業名・銘柄名が一緒に指定された株価グラフ依頼に必ず使用します。Tesla=TSLA、NVIDIA=NVDA。",
+            "description": "2社以上の株価を取得して表示します。通常は会社ごとに別々のグラフを表示します。「同じグラフで比較」「1枚のグラフ」と明示された場合だけ combined=true にします。Tesla=TSLA、NVIDIA=NVDA。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "symbols": {"type": "array", "items": {"type": "string"}, "description": "比較するティッカーの配列。例: [\"NVDA\", \"TSLA\"]"},
                     "days": {"type": "integer", "description": "直近営業日数。例: 30"},
+                    "combined": {"type": "boolean", "description": "同一グラフに重ねて比較する時だけ true。通常は false。"},
                 },
                 "required": ["symbols", "days"],
             },
@@ -391,7 +407,7 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     elif name == "get_stock_history":
         return get_stock_history(arguments.get("symbol", ""), arguments.get("days", 30))
     elif name == "get_stock_comparison":
-        return get_stock_comparison(arguments.get("symbols", []), arguments.get("days", 30))
+        return get_stock_comparison(arguments.get("symbols", []), arguments.get("days", 30), arguments.get("combined", False))
     elif name == "close_ui":
         return close_ui()
     else:

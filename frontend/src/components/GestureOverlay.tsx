@@ -29,15 +29,9 @@ const CONNECTIONS = [
 ];
 
 const GESTURE_LABELS: Record<GestureType, string> = {
-  cursor_move: '',
-  click: '🤏 CLICK',
-  double_click: '🤏🤏 DOUBLE CLICK',
   swipe_left: '← NEXT',
   swipe_right: 'PREVIOUS →',
-  swipe_up: 'SCROLL ↓',
-  swipe_down: 'SCROLL ↑',
-  zoom_in: 'ZOOM IN +',
-  zoom_out: 'ZOOM OUT −',
+  fist: '✊ CLOSE DISPLAY',
   none: '',
 };
 
@@ -118,8 +112,8 @@ export default function GestureOverlay({
           </div>
 
           <div className="absolute bottom-0 left-0 right-0 z-10 bg-black/75 px-1.5 py-1 text-center text-[8px] leading-3 text-neon-cyan/80">
-            指差し=カーソル · つまむ=クリック<br />
-            両手つまみ=ズーム · 手を払う=移動/スクロール
+            五指を開いて左右に動かす＝前/次<br />
+            拳を握る＝表示を閉じる
           </div>
 
           <video

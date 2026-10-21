@@ -11,9 +11,12 @@ interface ChartDisplayProps {
     series?: Array<{ name: string; values: number[] }>;
   };
   onClose: () => void;
+  pageIndex?: number;
+  pageCount?: number;
+  onNavigate?: (direction: -1 | 1) => void;
 }
 
-export default function ChartDisplay({ data, onClose }: ChartDisplayProps) {
+export default function ChartDisplay({ data, onClose, pageIndex = 0, pageCount = 1, onNavigate }: ChartDisplayProps) {
   const series = data.series?.length ? data.series : [{ name: data.title, values: data.values }];
   const allValues = series.flatMap((item) => item.values);
   const maxVal = Math.max(...allValues);
@@ -38,6 +41,14 @@ export default function ChartDisplay({ data, onClose }: ChartDisplayProps) {
       <h3 className="text-neon-magenta text-xl mb-6 font-bold tracking-widest" style={{ fontFamily: 'Orbitron' }}>
         {data.title}
       </h3>
+
+      {pageCount > 1 && (
+        <div className="mb-4 flex items-center justify-between border-y border-neon-magenta/25 py-2 text-xs text-neon-magenta/80">
+          <button type="button" onClick={() => onNavigate?.(-1)} className="border border-neon-magenta/50 px-3 py-1 hover:bg-neon-magenta hover:text-black">← PREVIOUS</button>
+          <span className="font-bold tracking-[0.2em]">CHART {pageIndex + 1} / {pageCount}</span>
+          <button type="button" onClick={() => onNavigate?.(1)} className="border border-neon-magenta/50 px-3 py-1 hover:bg-neon-magenta hover:text-black">NEXT →</button>
+        </div>
+      )}
 
       {series.length > 1 && (
         <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1 text-xs">
