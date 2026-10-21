@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CoreVisual from './CoreVisual';
 import ChartDisplay from './ChartDisplay';
 import WeatherDisplay from './WeatherDisplay';
@@ -36,6 +36,15 @@ export default function MoriInterface() {
   const [gestureEnabled, setGestureEnabled] = useState(false);
   // Keep the command console out of the way until the user explicitly opens it.
   const [showConsole, setShowConsole] = useState(false);
+
+  // Refs that keep the latest values accessible inside the gesture callback
+  // without needing to re-create the callback (which can cause stale closures).
+  const currentUIRef = useRef(currentUI);
+  currentUIRef.current = currentUI;
+  const mediaDataRef = useRef(mediaData);
+  mediaDataRef.current = mediaData;
+  const chartPagesRef = useRef(chartPages);
+  chartPagesRef.current = chartPages;
 
   const { isConnected, sendMessage } = useWebSocket('ws://localhost:8000/ws/chat', (data) => {
     if (data.type === 'text_response') {
@@ -105,24 +114,32 @@ export default function MoriInterface() {
   );
 
   // Presentation-style hand controls: open-palm left/right, fist to dismiss.
+  // Uses refs to always read the latest state values, avoiding stale closures
+  // that could cause incorrect behaviour (e.g. treating chart mode as core).
   const handleGesture = useCallback((gesture: GestureEvent) => {
+    const ui = currentUIRef.current;
+    const media = mediaDataRef.current;
+    const pages = chartPagesRef.current;
+
     switch (gesture.type) {
       case 'swipe_left':
-      case 'swipe_right':
-        if (currentUI === 'media' && mediaData?.results.length) {
-          const direction = gesture.type === 'swipe_left' ? 1 : -1;
-          setMediaIndex((index) => (index + direction + mediaData.results.length) % mediaData.results.length);
-        } else if (currentUI === 'chart' && chartPages.length > 1) {
-          const direction = gesture.type === 'swipe_left' ? 1 : -1;
-          setChartIndex((index) => (index + direction + chartPages.length) % chartPages.length);
+      case 'swipe_right': {
+        const direction = gesture.type === 'swipe_left' ? 1 : -1;
+        if (ui === 'media' && media?.results.length) {
+          const count = media.results.length;
+          setMediaIndex((index) => (index + direction + count) % count);
+        } else if (ui === 'chart' && pages.length > 1) {
+          const count = pages.length;
+          setChartIndex((index) => (index + direction + count) % count);
         }
         break;
+      }
       case 'fist':
         setWebPreviewOpen(false);
         setCurrentUI('core');
         break;
     }
-  }, [chartPages.length, currentUI, mediaData]);
+  }, []); // stable — reads from refs, no deps needed
 
   const { isActive: gestureActive, currentGesture, landmarks, detectionStatus, videoRef: gestureVideoRef } = useGesture(
     handleGesture,

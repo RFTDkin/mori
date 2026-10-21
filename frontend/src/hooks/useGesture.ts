@@ -14,9 +14,16 @@ interface HandLandmark { x: number; y: number; z: number; }
 
 const FINGER_TIPS = [8, 12, 16, 20];
 const FINGER_PIPS = [6, 10, 14, 18];
-const SWIPE_DISTANCE = 0.14;
-const SWIPE_FRAMES = 8;
+const SWIPE_DISTANCE = 0.08;
+const SWIPE_FRAMES = 5;
+const SWIPE_MAX_TIME = 1200;
 const COOLDOWN_MS = 700;
+/** How long (ms) a fist must be held before it triggers a dismiss event.
+ *  This prevents accidental fist detection while the hand is mid-swipe. */
+const FIST_HOLD_MS = 500;
+/** Small y-tolerance (normalised) added to the finger-extension check so that
+ *  a slightly tilted hand is still recognised as "open". */
+const EXTENSION_TOLERANCE = 0.025;
 const distance = (a: HandLandmark, b: HandLandmark) => Math.hypot(a.x - b.x, a.y - b.y);
 
 /**
@@ -37,6 +44,8 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
   const historyRef = useRef<{ x: number; y: number; time: number }[]>([]);
   const lastGestureRef = useRef(0);
   const fistActiveRef = useRef(false);
+  /** Timestamp when continuous fist pose was first detected. */
+  const fistStartRef = useRef(0);
   const lastTimestampRef = useRef(0);
 
   useEffect(() => { onGestureRef.current = onGesture; }, [onGesture]);
@@ -50,7 +59,11 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
 
   const analyseHand = useCallback((hand: HandLandmark[]) => {
     const now = Date.now();
-    const extended = FINGER_TIPS.map((tip, index) => hand[tip].y < hand[FINGER_PIPS[index]].y);
+    // Use a small y-tolerance so that a slightly tilted or sideways hand
+    // is still recognised as having extended fingers.
+    const extended = FINGER_TIPS.map((tip, index) =>
+      hand[tip].y < hand[FINGER_PIPS[index]].y + EXTENSION_TOLERANCE
+    );
     const extendedCount = extended.filter(Boolean).length;
 
     // Do not treat a sideways open hand as a fist. A fist must have all four
@@ -59,7 +72,12 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
     const compactFist = palmWidth > 0.02 && FINGER_TIPS.every((tip) => distance(hand[tip], hand[0]) < palmWidth * 1.45);
     if (compactFist) {
       historyRef.current = [];
-      if (!fistActiveRef.current && now - lastGestureRef.current > COOLDOWN_MS) {
+      // Require the fist to be held for FIST_HOLD_MS before emitting,
+      // so a briefly curled hand during a swipe motion doesn't dismiss.
+      if (fistStartRef.current === 0) {
+        fistStartRef.current = now;
+      }
+      if (!fistActiveRef.current && now - lastGestureRef.current > COOLDOWN_MS && now - fistStartRef.current >= FIST_HOLD_MS) {
         fistActiveRef.current = true;
         lastGestureRef.current = now;
         emit('fist');
@@ -67,11 +85,19 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
       return;
     }
     fistActiveRef.current = false;
+    fistStartRef.current = 0;
 
-    // Navigation deliberately requires a clear open hand (four extended
-    // fingers). Accidental motion with a pointing finger does nothing.
+    // Navigation requires a clear open hand (four extended fingers).
+    // When fingers are only briefly undetected (e.g. during fast motion),
+    // keep the swipe history alive so a single tracking glitch doesn't
+    // reset the whole swipe gesture.  Only fully clear when the hand is
+    // clearly NOT open (fewer than 2 extended fingers).
     if (extendedCount < 4) {
-      historyRef.current = [];
+      if (extendedCount < 2) {
+        // Clearly not an open hand — reset everything
+        historyRef.current = [];
+      }
+      // Otherwise just skip this frame but keep existing history
       return;
     }
     const history = historyRef.current;
@@ -82,7 +108,7 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
     const last = history[history.length - 1];
     const dx = last.x - first.x;
     const dy = last.y - first.y;
-    if (Math.abs(dx) < SWIPE_DISTANCE || Math.abs(dx) < Math.abs(dy) || last.time - first.time > 850) return;
+    if (Math.abs(dx) < SWIPE_DISTANCE || Math.abs(dx) < Math.abs(dy) || last.time - first.time > SWIPE_MAX_TIME) return;
     historyRef.current = [];
     lastGestureRef.current = now;
     emit(dx < 0 ? 'swipe_left' : 'swipe_right');
@@ -130,7 +156,7 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
         lastTimestampRef.current = timestamp;
         const hands = landmarker.detectForVideo(video, timestamp).landmarks as HandLandmark[][];
         if (hands?.length) { setLandmarks(hands[0]); setDetectionStatus('tracking'); analyseHand(hands[0]); }
-        else { setLandmarks(null); setDetectionStatus('searching'); historyRef.current = []; }
+        else { setLandmarks(null); setDetectionStatus('searching'); historyRef.current = []; fistStartRef.current = 0; }
       }
     } catch (error) { console.error('[Gesture] Detection failed:', error); setDetectionStatus('error'); }
     animationFrameRef.current = requestAnimationFrame(loop);
