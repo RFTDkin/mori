@@ -20,7 +20,7 @@ const SWIPE_MAX_TIME = 1200;
 const COOLDOWN_MS = 700;
 /** How long (ms) a fist must be held before it triggers a dismiss event.
  *  This prevents accidental fist detection while the hand is mid-swipe. */
-const FIST_HOLD_MS = 500;
+const FIST_HOLD_MS = 300;
 /** Small y-tolerance (normalised) added to the finger-extension check so that
  *  a slightly tilted hand is still recognised as "open". */
 const EXTENSION_TOLERANCE = 0.025;
@@ -69,7 +69,14 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
     // Do not treat a sideways open hand as a fist. A fist must have all four
     // fingertips physically close to the wrist relative to palm width.
     const palmWidth = distance(hand[5], hand[17]);
-    const compactFist = palmWidth > 0.02 && FINGER_TIPS.every((tip) => distance(hand[tip], hand[0]) < palmWidth * 1.45);
+    // Check how many fingertips are curled (tip below PIP or close to palm centre)
+    const palmCenter = { x: (hand[0].x + hand[9].x) / 2, y: (hand[0].y + hand[9].y) / 2, z: 0 };
+    const tipsCurled = FINGER_TIPS.filter((tip, index) =>
+      hand[tip].y > hand[FINGER_PIPS[index]].y - EXTENSION_TOLERANCE ||
+      distance(hand[tip], palmCenter) < palmWidth * 1.0
+    ).length;
+    const compactFist = palmWidth > 0.02 && tipsCurled >= 3 &&
+      FINGER_TIPS.every((tip) => distance(hand[tip], hand[0]) < palmWidth * 1.8);
     if (compactFist) {
       historyRef.current = [];
       // Require the fist to be held for FIST_HOLD_MS before emitting,
