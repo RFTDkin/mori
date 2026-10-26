@@ -1,15 +1,25 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 import json
 import logging
+import secrets
+from html import escape
+from google_auth_oauthlib.flow import Flow
 from .agent import MoriAgent
+from .config import settings
+from .gmail_tool import SCOPES, oauth_is_configured, save_credentials
 from .intents import classify_intent
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="M.O.R.I. API")
+# The same Flow instance holds the PKCE code_verifier generated before the
+# browser is sent to Google. It must be reused at the callback; constructing a
+# new Flow there causes Google's "Missing code verifier" rejection.
+oauth_flows: dict[str, Flow] = {}
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,6 +36,63 @@ class ChatResponse(BaseModel):
     text: str
     ui_command: dict | None = None
     tools_used: list = []
+
+
+def _google_flow(state: str | None = None) -> Flow:
+    """Create the local OAuth flow without ever handling a Gmail password."""
+    client_config = {
+        "web": {
+            "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
+            "client_secret": settings.GOOGLE_OAUTH_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [settings.GOOGLE_OAUTH_REDIRECT_URI],
+        }
+    }
+    return Flow.from_client_config(
+        client_config, scopes=SCOPES, state=state, redirect_uri=settings.GOOGLE_OAUTH_REDIRECT_URI
+    )
+
+
+@app.get("/api/gmail/oauth/login")
+async def gmail_oauth_login():
+    if not oauth_is_configured():
+        raise HTTPException(status_code=503, detail="Google OAuth is not configured")
+    state = secrets.token_urlsafe(32)
+    flow = _google_flow(state)
+    # Google requires PKCE for this OAuth client. ``Flow`` does not create a
+    # verifier automatically, so generate it before the authorization URL and
+    # retain the same Flow instance until the callback exchanges the code.
+    flow.code_verifier = secrets.token_urlsafe(64)
+    oauth_flows[state] = flow
+    url, _ = flow.authorization_url(access_type="offline", include_granted_scopes="true", prompt="consent")
+    return RedirectResponse(url)
+
+
+@app.get("/api/gmail/oauth/callback")
+async def gmail_oauth_callback(code: str | None = Query(default=None), state: str | None = Query(default=None)):
+    if not code or not state or state not in oauth_flows:
+        return HTMLResponse("<h2>Google login could not be verified. Please close this window and try again.</h2>", status_code=400)
+    flow = oauth_flows.pop(state)
+    try:
+        flow.fetch_token(code=code)
+        save_credentials(flow.credentials)
+    except Exception as exc:
+        logger.exception("Google OAuth callback failed")
+        # Google returns useful configuration codes such as redirect_uri_mismatch
+        # here. Show the local user the code, but never log or render secrets.
+        detail = escape(str(exc))[:400] or type(exc).__name__
+        return HTMLResponse(
+            "<h2>Google login failed.</h2>"
+            f"<p><code>{detail}</code></p>"
+            "<p>Close this window, correct the OAuth setting, then try again.</p>",
+            status_code=400,
+        )
+    origin = json.dumps(settings.FRONTEND_ORIGIN)
+    return HTMLResponse(
+        f"<script>window.opener?.postMessage({{type:'mori-gmail-connected'}}, {origin});window.close();</script>"
+        "<p>Google login completed. You may close this window.</p>"
+    )
 
 @app.get("/health")
 async def health_check():
@@ -131,6 +198,30 @@ async def websocket_endpoint(websocket: WebSocket):
                             await websocket.send_json({
                                 "type": "ui_command",
                                 "command": "set_console",
+                                "payload": cmd_data
+                            })
+                        elif cmd_type == "gmail":
+                            await websocket.send_json({
+                                "type": "ui_command",
+                                "command": "show_gmail",
+                                "payload": cmd_data
+                            })
+                        elif cmd_type == "gmail_auth":
+                            await websocket.send_json({
+                                "type": "ui_command",
+                                "command": "show_gmail_auth",
+                                "payload": cmd_data
+                            })
+                        elif cmd_type == "gmail_detail":
+                            await websocket.send_json({
+                                "type": "ui_command",
+                                "command": "show_gmail_detail",
+                                "payload": cmd_data
+                            })
+                        elif cmd_type == "gmail_opened":
+                            await websocket.send_json({
+                                "type": "ui_command",
+                                "command": "gmail_opened",
                                 "payload": cmd_data
                             })
                         elif cmd_type == "default":

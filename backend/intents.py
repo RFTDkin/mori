@@ -14,6 +14,9 @@ IntentAction = Literal[
     "select_media",
     "media_control",
     "console_control",
+    "open_gmail",
+    "check_gmail",
+    "read_gmail",
 ]
 
 _ORDINAL_WORDS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
@@ -21,10 +24,10 @@ _ORDINAL_WORDS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "�
 
 def _selected_number(message: str) -> int | None:
     """Read common forms such as 「第2個」and「二番目」as a one-based index."""
-    match = re.search(r"第?\s*(\d+)\s*(?:個|本|番目|つ|位|番)", message)
+    match = re.search(r"第?\s*(\d+)\s*(?:個|本|件|通|番目|つ|位|番)", message)
     if match:
         return int(match.group(1))
-    match = re.search(r"([一二三四五六七八九十])\s*(?:個|本|番目|つ|位|番)", message)
+    match = re.search(r"([一二三四五六七八九十])\s*(?:個|本|件|通|番目|つ|位|番)", message)
     return _ORDINAL_WORDS.get(match.group(1)) if match else None
 
 
@@ -36,6 +39,14 @@ class Intent:
 
 _YOUTUBE_PATTERN = re.compile(r"youtube|ユーチューブ|ゆーちゅーぶ", re.IGNORECASE)
 _WEB_PATTERN = re.compile(r"ネット|インターネット|ウェブ|\bweb\b|検索|調べ|調査|探して", re.IGNORECASE)
+_GMAIL_PATTERN = re.compile(
+    r"gmail|ジーメール|Gメール|gメール|メール|メイル|mail|email|e-mail|受信トレイ|受信箱|inbox",
+    re.IGNORECASE,
+)
+_GMAIL_CHECK_PATTERN = re.compile(
+    r"チェック|確認|見せて|見たい|見て|読んで|読みたい|教えて|取得|表示|一覧|未読|新着|最新|何件|何通|届い|来てる|来てい|ある|check|fetch|show|read",
+    re.IGNORECASE,
+)
 _COMMAND_PATTERN = re.compile(
     r"開いて|開けて|開く|再生してください|再生して|再生|流してください|流して|"
     r"見せて|見たい|検索してください|検索して|検索|調べてください|調べて|調べる|"
@@ -71,6 +82,8 @@ def classify_intent(message: str) -> Intent | None:
         return Intent("console_control", "off")
 
     selected_number = _selected_number(normalized)
+    if selected_number and any(phrase in normalized for phrase in ("読んで", "読み上げ", "内容", "本文", "メール")):
+        return Intent("read_gmail", str(selected_number - 1))
     if selected_number and any(phrase in normalized for phrase in ("再生", "播放", "流して", "見せて", "選んで")):
         return Intent("select_media", str(selected_number - 1))
 
@@ -83,6 +96,15 @@ def classify_intent(message: str) -> Intent | None:
         media_actions.append("fullscreen")
     if media_actions:
         return Intent("media_control", ",".join(media_actions))
+
+    # Gmail intents – must be checked before web search since "メール" could
+    # match the web pattern's "調べ" / "確認" keywords.
+    if _GMAIL_PATTERN.search(message):
+        if _GMAIL_CHECK_PATTERN.search(message):
+            # Determine if the user wants only unread emails.
+            unread = bool(re.search(r"未読|新着|unread", normalized))
+            return Intent("check_gmail", "unread" if unread else "all")
+        return Intent("open_gmail")
 
     if _YOUTUBE_PATTERN.search(message):
         query = _extract_query(message)

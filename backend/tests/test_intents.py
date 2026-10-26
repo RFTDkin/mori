@@ -42,6 +42,10 @@ class ClassifyIntentTests(unittest.TestCase):
         self.assertEqual((classify_intent("コンソールオン").action, classify_intent("コンソールオン").query), ("console_control", "on"))
         self.assertEqual((classify_intent("コンソールオフ").action, classify_intent("コンソールオフ").query), ("console_control", "off"))
 
+    def test_selects_a_numbered_email_for_reading(self):
+        intent = classify_intent("第2件を読んで")
+        self.assertEqual((intent.action, intent.query), ("read_gmail", "1"))
+
 
 if __name__ == "__main__":
     unittest.main()

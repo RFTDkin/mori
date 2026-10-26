@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CoreVisual from './CoreVisual';
 import ChartDisplay from './ChartDisplay';
 import WeatherDisplay from './WeatherDisplay';
+import GmailDisplay from './GmailDisplay';
 import MediaPanel, { MediaData } from './MediaPanel';
 import ChatInput from './ChatInput';
 import MessageLog from './MessageLog';
@@ -12,7 +13,7 @@ import useWebSocket from '../hooks/useWebSocket';
 import useVoice from '../hooks/useVoice';
 import useGesture, { GestureEvent } from '../hooks/useGesture';
 
-type UIMode = 'core' | 'media' | 'chart' | 'weather';
+type UIMode = 'core' | 'media' | 'chart' | 'weather' | 'gmail';
 
 export interface Message {
   id: string;
@@ -32,6 +33,9 @@ export default function MoriInterface() {
   const [chartPages, setChartPages] = useState<any[]>([]);
   const [chartIndex, setChartIndex] = useState(0);
   const [weatherData, setWeatherData] = useState<any>(null);
+  const [gmailData, setGmailData] = useState<any>(null);
+  const [gmailDetail, setGmailDetail] = useState<any>(null);
+  const [gmailAuth, setGmailAuth] = useState<any>(null);
   const [time, setTime] = useState<string>('');
   const [gestureEnabled, setGestureEnabled] = useState(false);
   // Keep the command console out of the way until the user explicitly opens it.
@@ -98,6 +102,19 @@ export default function MoriInterface() {
         setMediaControl((current) => ({ actions: data.payload.actions || [], version: current.version + 1 }));
       } else if (data.command === 'set_console') {
         setShowConsole(Boolean(data.payload.open));
+      } else if (data.command === 'show_gmail') {
+        setGmailData(data.payload);
+        setGmailDetail(null);
+        setGmailAuth(null);
+        setCurrentUI('gmail');
+      } else if (data.command === 'show_gmail_auth') {
+        setGmailData(null);
+        setGmailDetail(null);
+        setGmailAuth(data.payload);
+        setCurrentUI('gmail');
+      } else if (data.command === 'show_gmail_detail') {
+        setGmailDetail(data.payload);
+        setCurrentUI('gmail');
       } else if (data.command === 'reset') {
         if (currentUI === 'media' && mediaData?.mode === 'web' && webPreviewOpen) {
           setWebPreviewOpen(false);
@@ -112,6 +129,15 @@ export default function MoriInterface() {
     (text) => handleSend(text),
     () => {} // wake word detected callback
   );
+
+  useEffect(() => {
+    const handleGoogleLogin = (event: MessageEvent) => {
+      if (event.origin !== 'http://localhost:8000' || event.data?.type !== 'mori-gmail-connected') return;
+      sendMessage({ type: 'user_message', content: 'Gmailを開いて' });
+    };
+    window.addEventListener('message', handleGoogleLogin);
+    return () => window.removeEventListener('message', handleGoogleLogin);
+  }, [sendMessage]);
 
   // Presentation-style hand controls: open-palm left/right, fist to dismiss.
   // Uses refs to always read the latest state values, avoiding stale closures
@@ -175,6 +201,11 @@ export default function MoriInterface() {
     }
     addMessage('user', text);
     sendMessage({ type: 'user_message', content: text });
+  };
+
+  const handleGmailLogin = () => {
+    const popup = window.open('http://localhost:8000/api/gmail/oauth/login', 'mori-google-login', 'popup,width=520,height=680');
+    if (!popup) addMessage('mori', 'ポップアップがブロックされました。ブラウザで許可してから、もう一度お試しください。');
   };
 
   return (
@@ -253,6 +284,18 @@ export default function MoriInterface() {
 
             {currentUI === 'weather' && weatherData && (
               <WeatherDisplay data={weatherData} onClose={() => setCurrentUI('core')} />
+            )}
+
+            {currentUI === 'gmail' && (gmailData || gmailAuth) && (
+              <GmailDisplay
+                data={gmailData}
+                auth={gmailAuth}
+                detail={gmailDetail}
+                onClose={() => { setGmailDetail(null); setGmailAuth(null); setCurrentUI('core'); }}
+                onBack={() => setGmailDetail(null)}
+                onOpenEmail={(index) => handleSend(`第${index + 1}件を読んで`)}
+                onLogin={handleGmailLogin}
+              />
             )}
           </div>
 

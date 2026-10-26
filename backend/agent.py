@@ -13,6 +13,7 @@ class MoriAgent:
         self.client = AsyncGroq(api_key=settings.GROQ_API_KEY)
         self.model = settings.MODEL_NAME
         self.history = [{"role": "system", "content": settings.SYSTEM_PROMPT}]
+        self.gmail_emails: List[Dict[str, Any]] = []
 
     async def process_message(self, user_message: str) -> Dict[str, Any]:
         # Make multi-stock chart requests deterministic: the display must retain
@@ -80,6 +81,31 @@ class MoriAgent:
                     "ui_command": {"type": "console", "data": {"open": is_open}},
                     "tools_used": [],
                 }
+            if intent.action == "open_gmail":
+                tool_result = await asyncio.to_thread(execute_tool, "open_gmail", {})
+                self.gmail_emails = tool_result.get("ui_command", {}).get("data", {}).get("emails", [])
+                return {**tool_result, "tools_used": ["open_gmail"]}
+            if intent.action == "check_gmail":
+                unread_only = intent.query == "unread"
+                tool_result = await asyncio.to_thread(
+                    execute_tool, "check_gmail", {"count": 10, "unread_only": unread_only}
+                )
+                self.gmail_emails = tool_result.get("ui_command", {}).get("data", {}).get("emails", [])
+                return {**tool_result, "tools_used": ["check_gmail"]}
+            if intent.action == "read_gmail":
+                index = int(intent.query)
+                if not self.gmail_emails:
+                    return {
+                        "text": "先に「Gmailを開いて」または「メールを確認して」とお申し付けください。",
+                        "ui_command": None,
+                        "tools_used": [],
+                    }
+                if index < 0 or index >= len(self.gmail_emails):
+                    return {"text": f"{index + 1}番目のメールは表示されていません。", "ui_command": None, "tools_used": []}
+                tool_result = await asyncio.to_thread(
+                    execute_tool, "read_gmail_message", {"message_id": self.gmail_emails[index]["id"]}
+                )
+                return {**tool_result, "tools_used": ["read_gmail_message"]}
 
             # Searches can be part of a larger request (for example, research then
             # graph the result). Let the LLM plan those multi-step requests instead

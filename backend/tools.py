@@ -5,6 +5,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 from ddgs import DDGS
 import yt_dlp
+from .gmail_tool import open_gmail, check_gmail, read_gmail_message
 
 
 def _get_json(url: str) -> Dict[str, Any]:
@@ -274,6 +275,18 @@ TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "read_gmail_message",
+            "description": "指定したIDのGmail本文をM.O.R.I.画面に表示します。",
+            "parameters": {
+                "type": "object",
+                "properties": {"message_id": {"type": "string", "description": "IMAPメールID"}},
+                "required": ["message_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_stock_comparison",
             "description": "2社以上の株価を取得して表示します。通常は会社ごとに別々のグラフを表示します。「同じグラフで比較」「1枚のグラフ」と明示された場合だけ combined=true にします。Tesla=TSLA、NVIDIA=NVDA。",
             "parameters": {
@@ -373,6 +386,37 @@ TOOLS_SCHEMA = [
                 "properties": {}
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_gmail",
+            "description": "M.O.R.I.内のGmail受信トレイを開きます。ユーザーが「Gmailを開いて」「メールを開いて」と言った時に使います。",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_gmail",
+            "description": "Gmailの受信トレイからメールを取得して画面に表示します。「メールをチェックして」「未読メールを見せて」「メール確認して」などの依頼に使います。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "description": "取得するメール件数（1〜30）。デフォルトは10。"
+                    },
+                    "unread_only": {
+                        "type": "boolean",
+                        "description": "未読メールのみ取得する場合はtrue。デフォルトはfalse。"
+                    }
+                }
+            }
+        }
     }
 ]
 
@@ -410,5 +454,11 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         return get_stock_comparison(arguments.get("symbols", []), arguments.get("days", 30), arguments.get("combined", False))
     elif name == "close_ui":
         return close_ui()
+    elif name == "open_gmail":
+        return open_gmail()
+    elif name == "check_gmail":
+        return check_gmail(arguments.get("count", 10), arguments.get("unread_only", False))
+    elif name == "read_gmail_message":
+        return read_gmail_message(arguments.get("message_id", ""))
     else:
         return {"text": f"不明なツールです: {name}"}

@@ -1,4 +1,5 @@
 backend/.env
+backend/gmail_token.json
 backend/venv/
 __pycache__/
 *.py[cod]
