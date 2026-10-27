@@ -58,12 +58,14 @@ export default function MoriInterface() {
     } else if (data.type === 'ui_command') {
       if (data.command === 'media_loading') {
         setMediaData({ ...data.payload, results: [], error: null, loading: true });
-        setMediaIndex(0);
+        setMediaIndex(data.payload.mode === 'youtube' ? -1 : 0);
         setWebPreviewOpen(false);
         setCurrentUI('media');
       } else if (data.command === 'show_media') {
         setMediaData({ ...data.payload, loading: false });
-        setMediaIndex(0);
+        // Let people browse YouTube thumbnails first; selecting a card starts
+        // playback and switches to the player-plus-sidebar layout.
+        setMediaIndex(data.payload.mode === 'youtube' ? -1 : 0);
         setWebPreviewOpen(false);
         setCurrentUI('media');
       } else if (data.command === 'show_chart') {
@@ -90,7 +92,8 @@ export default function MoriInterface() {
           const count = mediaData?.results.length || 0;
           if (!count) return 0;
           const offset = data.payload.direction === 'previous' ? -1 : 1;
-          return (index + offset + count) % count;
+          const current = index < 0 ? (offset < 0 ? 0 : -1) : index;
+          return (current + offset + count) % count;
         });
       } else if (data.command === 'select_media') {
         setMediaIndex(() => {
@@ -115,6 +118,11 @@ export default function MoriInterface() {
       } else if (data.command === 'show_gmail_detail') {
         setGmailDetail(data.payload);
         setCurrentUI('gmail');
+      } else if (data.command === 'gmail_opened') {
+        // Gmail blocks iframe embedding for account security. Navigate at the
+        // top level so the user receives the complete official Gmail UI rather
+        // than the limited in-app ten-message preview.
+        window.location.assign(data.payload?.url || 'https://mail.google.com/mail/u/0/#inbox');
       } else if (data.command === 'reset') {
         if (currentUI === 'media' && mediaData?.mode === 'web' && webPreviewOpen) {
           setWebPreviewOpen(false);
@@ -153,7 +161,10 @@ export default function MoriInterface() {
         const direction = gesture.type === 'swipe_left' ? 1 : -1;
         if (ui === 'media' && media?.results.length) {
           const count = media.results.length;
-          setMediaIndex((index) => (index + direction + count) % count);
+          setMediaIndex((index) => {
+            const current = index < 0 ? (direction < 0 ? 0 : -1) : index;
+            return (current + direction + count) % count;
+          });
         } else if (ui === 'chart' && pages.length > 1) {
           const count = pages.length;
           setChartIndex((index) => (index + direction + count) % count);

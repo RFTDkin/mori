@@ -48,22 +48,31 @@ def search_web(query: str) -> str:
 
 
 def play_youtube(query: str) -> Dict[str, Any]:
-    """Search YouTube and return video ID for playback."""
+    """Search YouTube and return enough metadata for an informed selection."""
     try:
         ydl_opts = {
             'format': 'best',
             'noplaylist': True,
             'quiet': True,
             'extract_flat': True,
-            'default_search': 'ytsearch5'
+            'default_search': 'ytsearch12'
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch5:{query}", download=False)
-            videos = [
-                {"id": video.get("id"), "title": video.get("title", "タイトルなし")}
-                for video in (info.get("entries") or [])
-                if video.get("id")
-            ]
+            info = ydl.extract_info(f"ytsearch12:{query}", download=False)
+            videos = []
+            for video in info.get("entries") or []:
+                video_id = video.get("id")
+                if not video_id:
+                    continue
+                # yt-dlp exposes a thumbnail for most searches. The stable
+                # YouTube image URL is a reliable fallback for flat entries.
+                videos.append({
+                    "id": video_id,
+                    "title": video.get("title", "タイトルなし"),
+                    "thumbnail": video.get("thumbnail") or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+                    "channel": video.get("channel") or video.get("uploader") or "",
+                    "snippet": video.get("description") or "",
+                })
             text = (
                 f"YouTubeで「{videos[0]['title']}」など{len(videos)}件を見つけました。"
                 if videos
@@ -391,7 +400,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "open_gmail",
-            "description": "M.O.R.I.内のGmail受信トレイを開きます。ユーザーが「Gmailを開いて」「メールを開いて」と言った時に使います。",
+            "description": "公式Gmailの受信トレイをブラウザで開きます。ユーザーが「Gmailを開いて」「メールを開いて」と言った時に使います。",
             "parameters": {
                 "type": "object",
                 "properties": {}

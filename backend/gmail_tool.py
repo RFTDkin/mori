@@ -130,7 +130,20 @@ def _body(payload: Dict[str, Any]) -> str:
 
 
 def open_gmail() -> Dict[str, Any]:
-    return check_gmail()
+    """Open the user's full Gmail inbox instead of a truncated API preview.
+
+    Gmail deliberately prevents its authenticated UI from being embedded in an
+    iframe.  Sending a navigation command lets the browser load the official
+    inbox as a normal top-level page, with every message and Gmail feature
+    available.  ``check_gmail`` remains available for concise in-app previews.
+    """
+    return {
+        "text": "Gmailを開きます。",
+        "ui_command": {
+            "type": "gmail_opened",
+            "data": {"url": "https://mail.google.com/mail/u/0/#inbox"},
+        },
+    }
 
 
 def check_gmail(count: int = 10, unread_only: bool = False) -> Dict[str, Any]:

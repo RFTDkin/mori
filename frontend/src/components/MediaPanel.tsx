@@ -7,6 +7,8 @@ export interface MediaResult {
   title: string;
   snippet?: string;
   url?: string;
+  thumbnail?: string;
+  channel?: string;
 }
 
 export interface MediaData {
@@ -37,6 +39,7 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
   const playerRef = useRef<HTMLIFrameElement>(null);
   const playerStageRef = useRef<HTMLDivElement>(null);
   const selected = data.results[selectedIndex];
+  const isYoutubeBrowseView = data.mode === 'youtube' && !selected?.id;
 
   useEffect(() => {
     setQuery(data.query);
@@ -77,7 +80,8 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
 
   const moveSelection = (offset: number) => {
     if (!data.results.length) return;
-    onSelect((selectedIndex + offset + data.results.length) % data.results.length);
+    const current = selectedIndex < 0 ? (offset < 0 ? 0 : -1) : selectedIndex;
+    onSelect((current + offset + data.results.length) % data.results.length);
   };
 
   if (data.mode === 'web' && webPreviewOpen && selected?.url) {
@@ -143,6 +147,42 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
         </button>
       </form>
 
+      {isYoutubeBrowseView ? (
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="mb-3 flex items-center justify-between text-xs text-neon-cyan/65">
+            <span>{data.loading ? '検索中' : `${data.results.length} 件の動画`}</span>
+            <span>動画を選ぶと再生します</span>
+          </div>
+          {data.loading ? (
+            <p className="animate-pulse py-12 text-center text-sm text-neon-cyan">検索中...</p>
+          ) : data.error ? (
+            <p className="py-12 text-center text-sm text-red-300">検索に失敗しました: {data.error}</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {data.results.map((result, index) => (
+                <button
+                  key={result.id || `${result.title}-${index}`}
+                  type="button"
+                  onClick={() => onSelect(index)}
+                  className="group overflow-hidden border border-neon-cyan/20 bg-black/50 text-left transition-colors hover:border-neon-cyan hover:bg-neon-cyan/10"
+                >
+                  {result.thumbnail ? (
+                    <img src={result.thumbnail} alt="" className="aspect-video w-full object-cover" loading="lazy" />
+                  ) : (
+                    <div className="aspect-video bg-neon-cyan/5" />
+                  )}
+                  <span className="block p-3">
+                    <span className="block line-clamp-2 text-sm font-semibold leading-5 text-neon-cyan"><span className="mr-2 text-neon-magenta">{index + 1}.</span>{result.title}</span>
+                    {result.channel && <span className="mt-2 block truncate text-xs text-neon-green/80">{result.channel}</span>}
+                    {result.snippet && <span className="mt-1 block line-clamp-2 text-xs leading-4 text-white/60">{result.snippet}</span>}
+                  </span>
+                </button>
+              ))}
+              {!data.results.length && data.query && <p className="col-span-full py-12 text-center text-sm text-neon-cyan/60">結果がありません。別の語句で検索してください。</p>}
+            </div>
+          )}
+        </div>
+      ) : (
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(180px,1fr)_minmax(120px,0.65fr)] gap-3 overflow-y-auto p-3 md:grid-rows-1 md:grid-cols-[minmax(0,1.7fr)_minmax(220px,0.8fr)] md:overflow-hidden">
         <div ref={playerStageRef} data-mori-youtube-stage className="relative flex min-h-[180px] items-center justify-center overflow-hidden border border-neon-cyan/20 bg-black">
           {data.mode === 'youtube' && selected?.id ? (
@@ -193,11 +233,24 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
                   onSelect(index);
                   if (data.mode === 'web') onOpenWebsite?.();
                 }}
-                className={`block w-full border p-3 text-left transition-colors ${selectedIndex === index ? 'border-neon-cyan/70 bg-neon-cyan/10' : 'border-neon-cyan/15 hover:border-neon-cyan/45'}`}
+                className={`block w-full border p-2 text-left transition-colors ${selectedIndex === index ? 'border-neon-cyan/70 bg-neon-cyan/10' : 'border-neon-cyan/15 hover:border-neon-cyan/45'}`}
               >
-                <span className="block text-sm font-semibold text-neon-cyan"><span className="mr-2 text-neon-magenta">{index + 1}.</span>{result.title}</span>
-                {result.snippet && <span className="mt-1 block line-clamp-3 text-xs leading-5 text-white/65">{result.snippet}</span>}
-                {result.url && <span className="mt-2 block truncate text-[11px] text-neon-green/80">{result.url}</span>}
+                <div className="flex gap-3">
+                  {data.mode === 'youtube' && result.thumbnail && (
+                    <img
+                      src={result.thumbnail}
+                      alt=""
+                      className="h-[68px] w-[120px] shrink-0 border border-neon-cyan/20 object-cover"
+                      loading="lazy"
+                    />
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block line-clamp-2 text-sm font-semibold text-neon-cyan"><span className="mr-2 text-neon-magenta">{index + 1}.</span>{result.title}</span>
+                    {result.channel && <span className="mt-1 block truncate text-[11px] text-neon-green/80">{result.channel}</span>}
+                    {result.snippet && <span className="mt-1 block line-clamp-2 text-xs leading-4 text-white/65">{result.snippet}</span>}
+                    {result.url && <span className="mt-2 block truncate text-[11px] text-neon-green/80">{result.url}</span>}
+                  </span>
+                </div>
               </button>
             ))}
             {!data.loading && !data.error && data.results.length === 0 && data.query && (
@@ -211,6 +264,7 @@ export default function MediaPanel({ data, selectedIndex, onSelect, onSearch, on
           )}
         </div>
       </div>
+      )}
     </section>
   );
 }

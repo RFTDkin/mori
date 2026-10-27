@@ -22,13 +22,17 @@ class ExecuteToolTests(unittest.TestCase):
     def test_youtube_search_returns_multiple_selectable_videos(self, youtube_dl_class):
         youtube_dl = youtube_dl_class.return_value.__enter__.return_value
         youtube_dl.extract_info.return_value = {
-            "entries": [{"id": "video-1", "title": "動画1"}, {"id": "video-2", "title": "動画2"}]
+            "entries": [{"id": "video-1", "title": "動画1", "channel": "チャンネル1"}, {"id": "video-2", "title": "動画2"}]
         }
 
         response = execute_tool("play_youtube", {"query": "検索語"})
 
-        youtube_dl.extract_info.assert_called_once_with("ytsearch5:検索語", download=False)
-        self.assertEqual(response["ui_command"]["data"]["results"][1]["id"], "video-2")
+        youtube_dl.extract_info.assert_called_once_with("ytsearch12:検索語", download=False)
+        videos = response["ui_command"]["data"]["results"]
+        self.assertEqual(len(videos), 2)
+        self.assertEqual(videos[1]["id"], "video-2")
+        self.assertEqual(videos[0]["channel"], "チャンネル1")
+        self.assertEqual(videos[0]["thumbnail"], "https://i.ytimg.com/vi/video-1/hqdefault.jpg")
 
 
 if __name__ == "__main__":
