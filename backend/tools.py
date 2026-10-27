@@ -263,7 +263,36 @@ def close_ui() -> Dict[str, Any]:
         }
     }
 
+
+def show_explainer(title: str, summary: str, cards: List[Dict[str, str]]) -> Dict[str, Any]:
+    """Display a concise, source-backed visual explanation inside M.O.R.I."""
+    return {
+        "text": summary,
+        "ui_command": {"type": "explainer", "data": {
+            "title": title, "summary": summary, "cards": cards[:4], "sources": [],
+        }},
+    }
+
 TOOLS_SCHEMA = [
+    {
+        "type": "function",
+        "function": {
+            "name": "show_explainer",
+            "description": "検索結果を、短い要約と最大4枚の分かりやすい図解カードとしてM.O.R.I.画面に表示します。検索後、ユーザーが明示的に元サイトを要求していない通常の説明依頼では必ず使います。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "短い見出し"},
+                    "summary": {"type": "string", "description": "2文以内、160文字以内の簡潔な説明"},
+                    "cards": {"type": "array", "items": {"type": "object", "properties": {
+                        "title": {"type": "string", "description": "30文字以内"}, "body": {"type": "string", "description": "80文字以内、改行なし"},
+                        "kind": {"type": "string", "enum": ["what", "how", "why", "care"]},
+                    }, "required": ["title", "body", "kind"]}},
+                },
+                "required": ["title", "summary", "cards"],
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -448,6 +477,8 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         }
     elif name == "play_youtube":
         return play_youtube(arguments.get("query", ""))
+    elif name == "show_explainer":
+        return show_explainer(arguments.get("title", "解説"), arguments.get("summary", ""), arguments.get("cards", []))
     elif name == "show_chart":
         return show_chart(
             arguments.get("chart_type", "bar"),

@@ -39,6 +39,10 @@ class Intent:
 
 _YOUTUBE_PATTERN = re.compile(r"youtube|ユーチューブ|ゆーちゅーぶ", re.IGNORECASE)
 _WEB_PATTERN = re.compile(r"ネット|インターネット|ウェブ|\bweb\b|検索|調べ|調査|探して", re.IGNORECASE)
+_SOURCE_REQUEST_PATTERN = re.compile(
+    r"(?:ソース|出典|根拠|原文|リンク|ウェブサイト|サイト|資料|source|sources|reference|references|url|網頁|來源|原文)",
+    re.IGNORECASE,
+)
 _GMAIL_PATTERN = re.compile(
     r"gmail|ジーメール|Gメール|gメール|メール|メイル|mail|email|e-mail|受信トレイ|受信箱|inbox",
     re.IGNORECASE,
@@ -62,6 +66,11 @@ def _extract_query(message: str) -> str:
     query = _COMMAND_PATTERN.sub("", query)
     query = re.sub(r"^[\s、。:：でをに]+|[\s、。:：でをに]+$", "", query)
     return re.sub(r"\s+", " ", query).strip()
+
+
+def wants_sources(message: str) -> bool:
+    """Whether the user explicitly requested the original web material."""
+    return bool(_SOURCE_REQUEST_PATTERN.search(message))
 
 
 def classify_intent(message: str) -> Intent | None:

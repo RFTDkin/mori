@@ -6,7 +6,7 @@ import os
 import re
 from .config import settings
 from .tools import TOOLS_SCHEMA, execute_tool
-from .intents import classify_intent
+from .intents import classify_intent, wants_sources
 
 class MoriAgent:
     def __init__(self):
@@ -16,6 +16,9 @@ class MoriAgent:
         self.gmail_emails: List[Dict[str, Any]] = []
 
     async def process_message(self, user_message: str) -> Dict[str, Any]:
+        requested_sources = wants_sources(user_message)
+        latest_search_results: list[Dict[str, Any]] = []
+        source_ui_command = None
         # Make multi-stock chart requests deterministic: the display must retain
         # one chart per company unless the user explicitly asks for one combined chart.
         normalized = user_message.lower()
@@ -124,7 +127,9 @@ class MoriAgent:
                     messages=self.history,
                     tools=TOOLS_SCHEMA,
                     tool_choice="auto",
-                    max_tokens=1024
+                    # Explainer tool calls contain four cards. Leave enough
+                    # room for a complete JSON call rather than truncating it.
+                    max_tokens=2048
                 )
                 
                 message = response.choices[0].message
@@ -150,9 +155,18 @@ class MoriAgent:
 
                 if not message.tool_calls:
                     # No more tool calls, we are done
+                    if latest_search_results and not requested_sources and ui_command is None:
+                        ui_command = {
+                            "type": "explainer",
+                            "data": {
+                                "title": user_message[:80], "summary": message.content or "検索結果を確認しました。",
+                                "cards": [{"title": "要点", "body": message.content or "検索結果を確認しました。", "kind": "what"}],
+                                "sources": latest_search_results[:5],
+                            },
+                        }
                     return {
                         "text": message.content or "...",
-                        "ui_command": ui_command,
+                        "ui_command": source_ui_command if requested_sources and source_ui_command else ui_command,
                         "tools_used": tools_used
                     }
                 
@@ -165,8 +179,14 @@ class MoriAgent:
                     # Network-backed tools must not freeze the WebSocket event loop.
                     tool_result = await asyncio.to_thread(execute_tool, func_name, args)
                     
-                    if "ui_command" in tool_result:
+                    if func_name == "search_web":
+                        latest_search_results = tool_result.get("ui_command", {}).get("data", {}).get("results", [])
+                        if requested_sources:
+                            source_ui_command = tool_result.get("ui_command")
+                    elif "ui_command" in tool_result:
                         ui_command = tool_result["ui_command"]
+                        if func_name == "show_explainer" and latest_search_results:
+                            ui_command["data"]["sources"] = latest_search_results[:5]
                         
                     self.history.append({
                         "role": "tool",

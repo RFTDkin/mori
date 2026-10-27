@@ -10,7 +10,7 @@ from google_auth_oauthlib.flow import Flow
 from .agent import MoriAgent
 from .config import settings
 from .gmail_tool import SCOPES, oauth_is_configured, save_credentials
-from .intents import classify_intent
+from .intents import classify_intent, wants_sources
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -123,7 +123,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 if msg_type in ["text", "audio", "user_message"] and content:
                     intent = classify_intent(content)
-                    if intent and intent.action in ("web_search", "youtube_search"):
+                    if intent and (intent.action == "youtube_search" or (intent.action == "web_search" and wants_sources(content))):
                         await websocket.send_json({
                             "type": "ui_command",
                             "command": "media_loading",
@@ -175,6 +175,12 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "type": "ui_command",
                                 "command": "show_media",
                                 "payload": cmd_data
+                            })
+                        elif cmd_type == "explainer":
+                            await websocket.send_json({
+                                "type": "ui_command",
+                                "command": "show_explainer",
+                                "payload": cmd_data,
                             })
                         elif cmd_type == "navigate":
                             await websocket.send_json({

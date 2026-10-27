@@ -5,6 +5,7 @@ import CoreVisual from './CoreVisual';
 import ChartDisplay from './ChartDisplay';
 import WeatherDisplay from './WeatherDisplay';
 import GmailDisplay from './GmailDisplay';
+import ExplainerDisplay, { ExplainerData, ExplainerSource } from './ExplainerDisplay';
 import MediaPanel, { MediaData } from './MediaPanel';
 import ChatInput from './ChatInput';
 import MessageLog from './MessageLog';
@@ -13,7 +14,7 @@ import useWebSocket from '../hooks/useWebSocket';
 import useVoice from '../hooks/useVoice';
 import useGesture, { GestureEvent } from '../hooks/useGesture';
 
-type UIMode = 'core' | 'media' | 'chart' | 'weather' | 'gmail';
+type UIMode = 'core' | 'media' | 'chart' | 'weather' | 'gmail' | 'explainer';
 
 export interface Message {
   id: string;
@@ -36,6 +37,9 @@ export default function MoriInterface() {
   const [gmailData, setGmailData] = useState<any>(null);
   const [gmailDetail, setGmailDetail] = useState<any>(null);
   const [gmailAuth, setGmailAuth] = useState<any>(null);
+  const [explainerData, setExplainerData] = useState<ExplainerData | null>(null);
+  const [explainerIndex, setExplainerIndex] = useState(0);
+  const [returnToExplainer, setReturnToExplainer] = useState(false);
   const [time, setTime] = useState<string>('');
   const [gestureEnabled, setGestureEnabled] = useState(false);
   // Keep the command console out of the way until the user explicitly opens it.
@@ -49,6 +53,8 @@ export default function MoriInterface() {
   mediaDataRef.current = mediaData;
   const chartPagesRef = useRef(chartPages);
   chartPagesRef.current = chartPages;
+  const explainerDataRef = useRef(explainerData);
+  explainerDataRef.current = explainerData;
 
   const { isConnected, sendMessage } = useWebSocket('ws://localhost:8000/ws/chat', (data) => {
     if (data.type === 'text_response') {
@@ -57,11 +63,13 @@ export default function MoriInterface() {
       speak(data.content);
     } else if (data.type === 'ui_command') {
       if (data.command === 'media_loading') {
+        setReturnToExplainer(false);
         setMediaData({ ...data.payload, results: [], error: null, loading: true });
         setMediaIndex(data.payload.mode === 'youtube' ? -1 : 0);
         setWebPreviewOpen(false);
         setCurrentUI('media');
       } else if (data.command === 'show_media') {
+        setReturnToExplainer(false);
         setMediaData({ ...data.payload, loading: false });
         // Let people browse YouTube thumbnails first; selecting a card starts
         // playback and switches to the player-plus-sidebar layout.
@@ -118,6 +126,10 @@ export default function MoriInterface() {
       } else if (data.command === 'show_gmail_detail') {
         setGmailDetail(data.payload);
         setCurrentUI('gmail');
+      } else if (data.command === 'show_explainer') {
+        setExplainerData(data.payload);
+        setExplainerIndex(0);
+        setCurrentUI('explainer');
       } else if (data.command === 'gmail_opened') {
         // Gmail blocks iframe embedding for account security. Navigate at the
         // top level so the user receives the complete official Gmail UI rather
@@ -154,6 +166,7 @@ export default function MoriInterface() {
     const ui = currentUIRef.current;
     const media = mediaDataRef.current;
     const pages = chartPagesRef.current;
+    const explainer = explainerDataRef.current;
 
     switch (gesture.type) {
       case 'swipe_left':
@@ -168,6 +181,9 @@ export default function MoriInterface() {
         } else if (ui === 'chart' && pages.length > 1) {
           const count = pages.length;
           setChartIndex((index) => (index + direction + count) % count);
+        } else if (ui === 'explainer' && explainer && explainer.cards.length > 1) {
+          const count = explainer.cards.length;
+          setExplainerIndex((index) => (index + direction + count) % count);
         }
         break;
       }
@@ -268,13 +284,25 @@ export default function MoriInterface() {
                 selectedIndex={mediaIndex}
                 onSelect={setMediaIndex}
                 onSearch={(query) => handleSend(mediaData.mode === 'youtube' ? `YouTubeで${query}を検索して` : `ネットで${query}を検索して`)}
-                onClose={() => setCurrentUI('core')}
+                onClose={() => {
+                  setWebPreviewOpen(false);
+                  if (returnToExplainer) {
+                    setReturnToExplainer(false);
+                    setCurrentUI('explainer');
+                  } else setCurrentUI('core');
+                }}
                 webPreviewOpen={webPreviewOpen}
                 onOpenWebsite={() => {
                   setShowConsole(false);
                   setWebPreviewOpen(true);
                 }}
-                onCloseWebsite={() => setWebPreviewOpen(false)}
+                onCloseWebsite={() => {
+                  setWebPreviewOpen(false);
+                  if (returnToExplainer) {
+                    setReturnToExplainer(false);
+                    setCurrentUI('explainer');
+                  }
+                }}
                 playerActions={mediaControl.actions}
                 controlVersion={mediaControl.version}
               />
@@ -306,6 +334,25 @@ export default function MoriInterface() {
                 onBack={() => setGmailDetail(null)}
                 onOpenEmail={(index) => handleSend(`第${index + 1}件を読んで`)}
                 onLogin={handleGmailLogin}
+              />
+            )}
+
+            {currentUI === 'explainer' && explainerData && (
+              <ExplainerDisplay
+                data={explainerData}
+                cardIndex={explainerIndex}
+                onNavigate={(direction) => setExplainerIndex((index) => {
+                  const count = explainerData.cards.length;
+                  return count ? (index + direction + count) % count : 0;
+                })}
+                onClose={() => setCurrentUI('core')}
+                onOpenSource={(source: ExplainerSource) => {
+                  setMediaData({ mode: 'web', query: source.title, results: [{ title: source.title, snippet: source.snippet, url: source.url }], error: null });
+                  setMediaIndex(0);
+                  setWebPreviewOpen(true);
+                  setReturnToExplainer(true);
+                  setCurrentUI('media');
+                }}
               />
             )}
           </div>
