@@ -6,6 +6,7 @@ import ChartDisplay from './ChartDisplay';
 import WeatherDisplay from './WeatherDisplay';
 import GmailDisplay from './GmailDisplay';
 import ExplainerDisplay, { ExplainerData, ExplainerSource } from './ExplainerDisplay';
+import RecommendationDisplay, { RecommendationData, RecommendationItem } from './RecommendationDisplay';
 import MediaPanel, { MediaData } from './MediaPanel';
 import ChatInput from './ChatInput';
 import MessageLog from './MessageLog';
@@ -14,7 +15,7 @@ import useWebSocket from '../hooks/useWebSocket';
 import useVoice from '../hooks/useVoice';
 import useGesture, { GestureEvent } from '../hooks/useGesture';
 
-type UIMode = 'core' | 'media' | 'chart' | 'weather' | 'gmail' | 'explainer';
+type UIMode = 'core' | 'media' | 'chart' | 'weather' | 'gmail' | 'explainer' | 'recommendations';
 
 export interface Message {
   id: string;
@@ -39,7 +40,9 @@ export default function MoriInterface() {
   const [gmailAuth, setGmailAuth] = useState<any>(null);
   const [explainerData, setExplainerData] = useState<ExplainerData | null>(null);
   const [explainerIndex, setExplainerIndex] = useState(0);
+  const [recommendationData, setRecommendationData] = useState<RecommendationData | null>(null);
   const [returnToExplainer, setReturnToExplainer] = useState(false);
+  const [returnToRecommendations, setReturnToRecommendations] = useState(false);
   const [time, setTime] = useState<string>('');
   const [gestureEnabled, setGestureEnabled] = useState(false);
   // Keep the command console out of the way until the user explicitly opens it.
@@ -64,12 +67,14 @@ export default function MoriInterface() {
     } else if (data.type === 'ui_command') {
       if (data.command === 'media_loading') {
         setReturnToExplainer(false);
+        setReturnToRecommendations(false);
         setMediaData({ ...data.payload, results: [], error: null, loading: true });
         setMediaIndex(data.payload.mode === 'youtube' ? -1 : 0);
         setWebPreviewOpen(false);
         setCurrentUI('media');
       } else if (data.command === 'show_media') {
         setReturnToExplainer(false);
+        setReturnToRecommendations(false);
         setMediaData({ ...data.payload, loading: false });
         // Let people browse YouTube thumbnails first; selecting a card starts
         // playback and switches to the player-plus-sidebar layout.
@@ -130,6 +135,10 @@ export default function MoriInterface() {
         setExplainerData(data.payload);
         setExplainerIndex(0);
         setCurrentUI('explainer');
+      } else if (data.command === 'show_recommendations') {
+        setRecommendationData(data.payload);
+        setReturnToRecommendations(false);
+        setCurrentUI('recommendations');
       } else if (data.command === 'gmail_opened') {
         // Gmail blocks iframe embedding for account security. Navigate at the
         // top level so the user receives the complete official Gmail UI rather
@@ -289,6 +298,9 @@ export default function MoriInterface() {
                   if (returnToExplainer) {
                     setReturnToExplainer(false);
                     setCurrentUI('explainer');
+                  } else if (returnToRecommendations) {
+                    setReturnToRecommendations(false);
+                    setCurrentUI('recommendations');
                   } else setCurrentUI('core');
                 }}
                 webPreviewOpen={webPreviewOpen}
@@ -301,6 +313,9 @@ export default function MoriInterface() {
                   if (returnToExplainer) {
                     setReturnToExplainer(false);
                     setCurrentUI('explainer');
+                  } else if (returnToRecommendations) {
+                    setReturnToRecommendations(false);
+                    setCurrentUI('recommendations');
                   }
                 }}
                 playerActions={mediaControl.actions}
@@ -351,6 +366,22 @@ export default function MoriInterface() {
                   setMediaIndex(0);
                   setWebPreviewOpen(true);
                   setReturnToExplainer(true);
+                  setReturnToRecommendations(false);
+                  setCurrentUI('media');
+                }}
+              />
+            )}
+
+            {currentUI === 'recommendations' && recommendationData && (
+              <RecommendationDisplay
+                data={recommendationData}
+                onClose={() => setCurrentUI('core')}
+                onOpen={(item: RecommendationItem) => {
+                  setMediaData({ mode: 'web', query: item.title, results: [{ title: item.title, snippet: item.snippet, url: item.url }], error: null });
+                  setMediaIndex(0);
+                  setWebPreviewOpen(true);
+                  setReturnToExplainer(false);
+                  setReturnToRecommendations(true);
                   setCurrentUI('media');
                 }}
               />

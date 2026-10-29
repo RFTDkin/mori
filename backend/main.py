@@ -182,6 +182,12 @@ async def websocket_endpoint(websocket: WebSocket):
                                 "command": "show_explainer",
                                 "payload": cmd_data,
                             })
+                        elif cmd_type == "recommendations":
+                            await websocket.send_json({
+                                "type": "ui_command",
+                                "command": "show_recommendations",
+                                "payload": cmd_data,
+                            })
                         elif cmd_type == "navigate":
                             await websocket.send_json({
                                 "type": "ui_command",

@@ -20,6 +20,21 @@ _VISUAL_INFORMATION_REQUEST = re.compile(
     r"(?:とは|なに|何|おすすめ|お勧め|教えて|知りたい|調べて|解説|説明|どうして|なぜ|おすすめは)",
     re.IGNORECASE,
 )
+_RECOMMENDATION_REQUEST = re.compile(
+    r"おすすめ|お勧め|おすすめは|推薦|人気.*(?:店|場所|観光|アクティビティ)|(?:おいしい|美味しい).*(?:焼肉|店|レストラン|料理|食べ)",
+    re.IGNORECASE,
+)
+
+
+def _concise_reply(text: str, limit: int = 420) -> str:
+    """Keep ordinary chat output focused; visual cards carry the extra detail."""
+    clean = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if len(clean) <= limit:
+        return clean
+    # Finish at the nearest Japanese sentence boundary where possible, rather
+    # than cutting a word or Markdown marker in half.
+    boundary = max(clean.rfind(mark, 0, limit) for mark in ("。", "！", "？", "\n"))
+    return clean[:boundary + 1].rstrip() if boundary >= max(20, limit // 2) else clean[:limit].rstrip() + "…"
 
 
 def _follow_up_cards(text: str) -> list[Dict[str, str]]:
@@ -51,6 +66,21 @@ def _follow_up_cards(text: str) -> list[Dict[str, str]]:
     ]
 
 
+def _result_cards(results: List[Dict[str, Any]]) -> list[Dict[str, str]]:
+    """Make a useful visual fallback from one completed web search."""
+    kinds = ["what", "how", "why", "care"]
+    cards = []
+    for index, result in enumerate(results[:4]):
+        cards.append({
+            "title": result.get("title", f"候補 {index + 1}")[:60],
+            "body": (result.get("snippet") or "詳しい内容は、下の情報源をご確認ください。")[:160],
+            "kind": kinds[index],
+        })
+    return cards or [{
+        "title": "検索結果", "body": "候補を取得できませんでした。条件を少し変えてお試しください。", "kind": "what",
+    }]
+
+
 class MoriAgent:
     def __init__(self):
         self.client = AsyncGroq(api_key=settings.GROQ_API_KEY)
@@ -65,6 +95,7 @@ class MoriAgent:
         explainer_follow_up = bool(getattr(self, "last_explainer_sources", []) and _EXPLAINER_FOLLOW_UP.search(user_message))
         latest_search_results: list[Dict[str, Any]] = []
         source_ui_command = None
+        is_visual_information_request = bool(_VISUAL_INFORMATION_REQUEST.search(user_message))
         # Make multi-stock chart requests deterministic: the display must retain
         # one chart per company unless the user explicitly asks for one combined chart.
         normalized = user_message.lower()
@@ -160,17 +191,26 @@ class MoriAgent:
             # graph the result). Let the LLM plan those multi-step requests instead
             # of short-circuiting them with a keyword rule.
 
+        # Recommendations need a comparison of concrete candidates, not the
+        # WHAT/HOW/WHY explainer template. Build source-backed cards directly.
+        if not requested_sources and _RECOMMENDATION_REQUEST.search(user_message):
+            tool_result = await asyncio.to_thread(execute_tool, "get_recommendations", {"query": user_message})
+            return {**tool_result, "tools_used": ["get_recommendations"]}
+
         # A new explain/recommendation question must not inherit the previous
         # topic's cards. Fetch fresh material up front so a visual answer can
         # still be rendered if the model replies in plain text rather than
         # making a search tool call itself.
-        if not requested_sources and not explainer_follow_up and _VISUAL_INFORMATION_REQUEST.search(user_message):
+        if not requested_sources and not explainer_follow_up and is_visual_information_request:
             prefetched = await asyncio.to_thread(execute_tool, "search_web", {"query": user_message})
             latest_search_results = prefetched.get("ui_command", {}).get("data", {}).get("results", [])
 
         self.history.append({"role": "user", "content": user_message})
         
-        max_iterations = 3
+        # A recommendation/information request already has one fresh search
+        # result. Give the model one turn to synthesize it; do not let it burn
+        # every iteration on near-identical re-searches.
+        max_iterations = 1 if latest_search_results else 3
         ui_command = None
         tools_used = []
 
@@ -232,7 +272,7 @@ class MoriAgent:
                         self.last_explainer_sources = ui_command.get("data", {}).get("sources", [])
                         self.last_explainer_title = ui_command.get("data", {}).get("title", "")
                     return {
-                        "text": message.content or "...",
+                        "text": _concise_reply(message.content or "..."),
                         "ui_command": source_ui_command if requested_sources and source_ui_command else ui_command,
                         "tools_used": tools_used
                     }
@@ -242,6 +282,12 @@ class MoriAgent:
                     func_name = tool_call.function.name
                     args = json.loads(tool_call.function.arguments)
                     tools_used.append(func_name)
+
+                    if func_name == "search_web" and latest_search_results and is_visual_information_request:
+                        # Use the search performed at the start of this turn.
+                        # The model occasionally rephrases the same restaurant
+                        # query several times, which only wastes iterations.
+                        continue
                     
                     # Network-backed tools must not freeze the WebSocket event loop.
                     tool_result = await asyncio.to_thread(execute_tool, func_name, args)
@@ -270,6 +316,32 @@ class MoriAgent:
                 }
         
         # If max iterations reached
+        if latest_search_results and not requested_sources and ui_command is None:
+            explainer = {
+                "type": "explainer",
+                "data": {
+                    "title": user_message[:80],
+                    "summary": "検索結果から、候補を簡潔にまとめました。",
+                    "cards": _result_cards(latest_search_results),
+                    "sources": latest_search_results[:5],
+                },
+            }
+            self.last_explainer_sources = latest_search_results[:5]
+            self.last_explainer_title = user_message[:80]
+            return {
+                "text": "候補を表示します。詳細は各カードまたは情報源をご確認ください。",
+                "ui_command": explainer,
+                "tools_used": tools_used,
+            }
+        if ui_command is not None:
+            if ui_command.get("type") == "explainer":
+                self.last_explainer_sources = ui_command.get("data", {}).get("sources", [])
+                self.last_explainer_title = ui_command.get("data", {}).get("title", "")
+            return {
+                "text": "結果を表示します。",
+                "ui_command": ui_command,
+                "tools_used": tools_used,
+            }
         return {
             "text": "思考回数の上限に達しました。",
             "ui_command": ui_command,

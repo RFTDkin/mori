@@ -31,6 +31,34 @@ def search_web_results(query: str) -> Dict[str, Any]:
         return {"results": [], "error": str(e)}
 
 
+def _search_images(query: str, count: int = 3) -> List[str]:
+    """Return real image URLs for recommendation cards when available."""
+    try:
+        results = DDGS().images(query, max_results=count)
+        return [item.get("image", "") for item in results or [] if item.get("image")]
+    except Exception:
+        # Search engines can block image endpoints independently. Text results
+        # remain useful, and the frontend provides an honest no-image fallback.
+        return []
+
+
+def get_recommendations(query: str) -> Dict[str, Any]:
+    """Create source-backed recommendation cards, not generic explainer cards."""
+    response = search_web_results(query)
+    results = response.get("results", [])[:3]
+    images = _search_images(f"{query} food", count=len(results)) if results else []
+    items = [
+        {**result, "image": images[index] if index < len(images) else ""}
+        for index, result in enumerate(results)
+    ]
+    return {
+        "text": "おすすめ候補を表示します。営業時間・空席・価格は、予約前に各店舗の公式情報をご確認ください。",
+        "ui_command": {"type": "recommendations", "data": {
+            "query": query, "items": items, "error": response.get("error"),
+        }},
+    }
+
+
 def format_search_results(response: Dict[str, Any]) -> str:
     if response["error"]:
         return f"検索中にエラーが発生しました: {response['error']}"
@@ -296,6 +324,14 @@ TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "get_recommendations",
+            "description": "飲食店・観光・商品などのおすすめを、情報源付きの推薦カードで表示します。",
+            "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_web",
             "description": "インターネットで最新の情報を検索します。",
             "parameters": {
@@ -475,6 +511,8 @@ def execute_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 },
             },
         }
+    elif name == "get_recommendations":
+        return get_recommendations(arguments.get("query", ""))
     elif name == "play_youtube":
         return play_youtube(arguments.get("query", ""))
     elif name == "show_explainer":

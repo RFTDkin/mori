@@ -34,6 +34,18 @@ class ExecuteToolTests(unittest.TestCase):
         self.assertEqual(videos[0]["channel"], "チャンネル1")
         self.assertEqual(videos[0]["thumbnail"], "https://i.ytimg.com/vi/video-1/hqdefault.jpg")
 
+    @patch("backend.tools._search_images", return_value=["https://images.example/food.jpg"])
+    @patch("backend.tools.DDGS")
+    def test_recommendations_are_source_backed_cards(self, ddgs_class, _image_search):
+        ddgs_class.return_value.text.return_value = [{"title": "店 A", "body": "焼肉店", "href": "https://example.com/a"}]
+
+        response = execute_tool("get_recommendations", {"query": "札幌 焼肉 おすすめ"})
+
+        item = response["ui_command"]["data"]["items"][0]
+        self.assertEqual(response["ui_command"]["type"], "recommendations")
+        self.assertEqual(item["title"], "店 A")
+        self.assertEqual(item["image"], "https://images.example/food.jpg")
+
 
 if __name__ == "__main__":
     unittest.main()
