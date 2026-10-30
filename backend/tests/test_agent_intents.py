@@ -17,6 +17,17 @@ class AgentIntentTests(unittest.TestCase):
         groq_class.assert_not_called()
         self.assertEqual(result["ui_command"]["data"]["mode"], "youtube")
 
+    def test_youtube_search_bypasses_explainer_cards_and_returns_media(self):
+        with patch("backend.agent.execute_tool", return_value={
+            "text": "動画を見つけました。",
+            "ui_command": {"type": "media", "data": {"mode": "youtube", "results": [{"id": "abc"}]}},
+        }) as execute:
+            result = asyncio.run(self.agent.process_message("YouTubeで猫動画を調べて"))
+
+        execute.assert_called_once_with("play_youtube", {"query": "猫動画"})
+        self.assertEqual(result["ui_command"]["type"], "media")
+        self.assertEqual(result["tools_used"], ["play_youtube"])
+
     def test_web_search_is_classified_but_not_a_fixed_action(self):
         """The agent, not the regex router, plans searches that may have later steps."""
         intent = classify_intent("ネットで富士山の天気を調べて")

@@ -125,6 +125,14 @@ class MoriAgent:
                     "ui_command": {"type": "media", "data": {"mode": "youtube", "query": "", "results": [], "error": None}},
                     "tools_used": [],
                 }
+            # YouTube is a media command, not a general information request.
+            # Handle it before the visual-card search fallback below so phrases
+            # such as 「YouTubeで〜を調べて」 always return video results.
+            if intent.action == "youtube_search":
+                tool_result = await asyncio.to_thread(
+                    execute_tool, "play_youtube", {"query": intent.query}
+                )
+                return {**tool_result, "tools_used": ["play_youtube"]}
             if intent.action == "open_search":
                 return {
                     "text": "検索画面を開きました。検索語を入力するか、音声でお申し付けください。",

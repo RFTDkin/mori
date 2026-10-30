@@ -14,9 +14,15 @@ interface HandLandmark { x: number; y: number; z: number; }
 
 const FINGER_TIPS = [8, 12, 16, 20];
 const FINGER_PIPS = [6, 10, 14, 18];
-const SWIPE_DISTANCE = 0.08;
-const SWIPE_FRAMES = 5;
-const SWIPE_MAX_TIME = 1200;
+// Coordinates from MediaPipe are from the camera, while the preview is mirrored.
+// Keep all swipe calculations in *screen* coordinates so "move right" always
+// means right in the preview and to the person using it.
+const SWIPE_DISTANCE = 0.09;
+const SWIPE_MIN_TIME = 80;
+const SWIPE_MAX_TIME = 450;
+const SWIPE_DIRECTION_DOMINANCE = 1.7;
+const MIN_SWIPE_SAMPLES = 4;
+const POSITION_SMOOTHING = 0.45;
 const COOLDOWN_MS = 700;
 /** How long (ms) a fist must be held before it triggers a dismiss event.
  *  This prevents accidental fist detection while the hand is mid-swipe. */
@@ -42,6 +48,8 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
   const streamRef = useRef<MediaStream | null>(null);
   const onGestureRef = useRef(onGesture);
   const historyRef = useRef<{ x: number; y: number; time: number }[]>([]);
+  const smoothedPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const lastHandSeenRef = useRef(0);
   const lastGestureRef = useRef(0);
   const fistActiveRef = useRef(false);
   /** Timestamp when continuous fist pose was first detected. */
@@ -79,6 +87,7 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
       FINGER_TIPS.every((tip) => distance(hand[tip], hand[0]) < palmWidth * 1.8);
     if (compactFist) {
       historyRef.current = [];
+      smoothedPositionRef.current = null;
       // Require the fist to be held for FIST_HOLD_MS before emitting,
       // so a briefly curled hand during a swipe motion doesn't dismiss.
       if (fistStartRef.current === 0) {
@@ -103,20 +112,48 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
       if (extendedCount < 2) {
         // Clearly not an open hand — reset everything
         historyRef.current = [];
+        smoothedPositionRef.current = null;
       }
       // Otherwise just skip this frame but keep existing history
       return;
     }
+    // Average stable palm landmarks instead of using only the wrist. The wrist
+    // moves noticeably when a hand rotates, which used to look like a swipe.
+    const palm = [0, 5, 9, 13, 17].reduce(
+      (total, point) => ({ x: total.x + hand[point].x / 5, y: total.y + hand[point].y / 5 }),
+      { x: 0, y: 0 }
+    );
+    // The camera feed is mirrored in GestureOverlay, hence invert x here too.
+    const screenPosition = { x: 1 - palm.x, y: palm.y };
+    const previousPosition = smoothedPositionRef.current;
+    const position = previousPosition
+      ? {
+          x: previousPosition.x + (screenPosition.x - previousPosition.x) * POSITION_SMOOTHING,
+          y: previousPosition.y + (screenPosition.y - previousPosition.y) * POSITION_SMOOTHING,
+        }
+      : screenPosition;
+    smoothedPositionRef.current = position;
+
     const history = historyRef.current;
-    history.push({ x: hand[0].x, y: hand[0].y, time: now });
-    while (history.length > SWIPE_FRAMES) history.shift();
-    if (history.length < SWIPE_FRAMES || now - lastGestureRef.current < COOLDOWN_MS) return;
+    history.push({ ...position, time: now });
+    while (history.length > MIN_SWIPE_SAMPLES && now - history[0].time > SWIPE_MAX_TIME) history.shift();
+    if (history.length < MIN_SWIPE_SAMPLES || now - lastGestureRef.current < COOLDOWN_MS) return;
     const first = history[0];
     const last = history[history.length - 1];
     const dx = last.x - first.x;
     const dy = last.y - first.y;
-    if (Math.abs(dx) < SWIPE_DISTANCE || Math.abs(dx) < Math.abs(dy) || last.time - first.time > SWIPE_MAX_TIME) return;
+    const elapsed = last.time - first.time;
+    const horizontalSteps = history.slice(1).map((point, index) => point.x - history[index].x).filter((step) => Math.abs(step) > 0.002);
+    const consistentSteps = horizontalSteps.filter((step) => Math.sign(step) === Math.sign(dx)).length;
+    const isConsistent = horizontalSteps.length >= 2 && consistentSteps / horizontalSteps.length >= 0.75;
+    if (
+      elapsed < SWIPE_MIN_TIME ||
+      Math.abs(dx) < SWIPE_DISTANCE ||
+      Math.abs(dx) < Math.abs(dy) * SWIPE_DIRECTION_DOMINANCE ||
+      !isConsistent
+    ) return;
     historyRef.current = [];
+    smoothedPositionRef.current = null;
     lastGestureRef.current = now;
     emit(dx < 0 ? 'swipe_left' : 'swipe_right');
   }, [emit]);
@@ -129,7 +166,7 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
       const options = {
         baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate: 'GPU' as const },
         runningMode: 'VIDEO' as const, numHands: 1,
-        minHandDetectionConfidence: 0.2, minHandPresenceConfidence: 0.2, minTrackingConfidence: 0.2,
+        minHandDetectionConfidence: 0.55, minHandPresenceConfidence: 0.55, minTrackingConfidence: 0.5,
       };
       try { landmarkerRef.current = await HandLandmarker.createFromOptions(fileset, options); }
       catch { landmarkerRef.current = await HandLandmarker.createFromOptions(fileset, { ...options, baseOptions: { ...options.baseOptions, delegate: 'CPU' as const } }); }
@@ -162,8 +199,18 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
       if (timestamp > lastTimestampRef.current) {
         lastTimestampRef.current = timestamp;
         const hands = landmarker.detectForVideo(video, timestamp).landmarks as HandLandmark[][];
-        if (hands?.length) { setLandmarks(hands[0]); setDetectionStatus('tracking'); analyseHand(hands[0]); }
-        else { setLandmarks(null); setDetectionStatus('searching'); historyRef.current = []; fistStartRef.current = 0; }
+        if (hands?.length) {
+          lastHandSeenRef.current = Date.now();
+          setLandmarks(hands[0]); setDetectionStatus('tracking'); analyseHand(hands[0]);
+        } else {
+          setLandmarks(null); setDetectionStatus('searching'); fistStartRef.current = 0;
+          // One lost video frame is common during a fast swipe. Keep the
+          // recent path briefly, but never let an old path trigger later.
+          if (Date.now() - lastHandSeenRef.current > 180) {
+            historyRef.current = [];
+            smoothedPositionRef.current = null;
+          }
+        }
       }
     } catch (error) { console.error('[Gesture] Detection failed:', error); setDetectionStatus('error'); }
     animationFrameRef.current = requestAnimationFrame(loop);
@@ -175,6 +222,9 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
     setIsActive(true);
     if (!(await startCamera())) { setIsActive(false); return; }
     lastTimestampRef.current = 0;
+    historyRef.current = [];
+    smoothedPositionRef.current = null;
+    lastHandSeenRef.current = 0;
     animationFrameRef.current = requestAnimationFrame(loop);
   }, [init, loop, startCamera]);
 
@@ -184,6 +234,8 @@ export default function useGesture(onGesture: (gesture: GestureEvent) => void, e
     streamRef.current?.getTracks().forEach(track => track.stop());
     streamRef.current = null;
     landmarkerRef.current?.close(); landmarkerRef.current = null;
+    historyRef.current = [];
+    smoothedPositionRef.current = null;
     setIsActive(false); setLandmarks(null); setCurrentGesture('none'); setDetectionStatus('starting');
   }, []);
 

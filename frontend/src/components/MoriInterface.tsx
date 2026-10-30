@@ -169,6 +169,8 @@ export default function MoriInterface() {
   }, [sendMessage]);
 
   // Presentation-style hand controls: open-palm left/right, fist to dismiss.
+  // Gesture directions are expressed in the mirrored camera preview: moving
+  // right advances and moving left goes back, matching the visible UI arrows.
   // Uses refs to always read the latest state values, avoiding stale closures
   // that could cause incorrect behaviour (e.g. treating chart mode as core).
   const handleGesture = useCallback((gesture: GestureEvent) => {
@@ -180,7 +182,7 @@ export default function MoriInterface() {
     switch (gesture.type) {
       case 'swipe_left':
       case 'swipe_right': {
-        const direction = gesture.type === 'swipe_left' ? 1 : -1;
+        const direction = gesture.type === 'swipe_right' ? 1 : -1;
         if (ui === 'media' && media?.results.length) {
           const count = media.results.length;
           setMediaIndex((index) => {

@@ -29,8 +29,8 @@ const CONNECTIONS = [
 ];
 
 const GESTURE_LABELS: Record<GestureType, string> = {
-  swipe_left: '← NEXT',
-  swipe_right: 'PREVIOUS →',
+  swipe_left: '← PREVIOUS',
+  swipe_right: 'NEXT →',
   fist: '✊ CLOSE DISPLAY',
   none: '',
 };
@@ -112,7 +112,7 @@ export default function GestureOverlay({
           </div>
 
           <div className="absolute bottom-0 left-0 right-0 z-10 bg-black/75 px-1.5 py-1 text-center text-[8px] leading-3 text-neon-cyan/80">
-            五指を開いて左右に動かす＝前/次<br />
+            五指を開いて右＝次、左＝前<br />
             拳を握る＝表示を閉じる
           </div>
 
