@@ -38,7 +38,7 @@ def _concise_reply(text: str, limit: int = 420) -> str:
 
 
 def _follow_up_cards(text: str) -> list[Dict[str, str]]:
-    """Turn a normal follow-up answer into four small, readable cards.
+    """Turn a Japanese follow-up answer into only as many cards as it needs.
 
     This is deliberately a fallback: it keeps the visual explanation current
     even when the model elects to answer a follow-up directly instead of
@@ -49,31 +49,31 @@ def _follow_up_cards(text: str) -> list[Dict[str, str]]:
     clean = re.sub(r"[*#`]", "", text)
     clean = re.sub(r"\s+", " ", clean).strip()
     sentences = [item.strip() for item in re.split(r"(?<=[。！？])", clean) if item.strip()]
-    if len(sentences) < 4:
-        width = max(1, (len(clean) + 3) // 4)
+    if not sentences:
+        sentences = ["確認できる情報が不足しています。検索条件を変えてお試しください。"]
+    if len(sentences) == 1 and len(clean) > 180:
+        # A reply without Japanese sentence punctuation can still be split into
+        # readable cards, but never padded to an arbitrary count.
+        width = 160
         sentences = [clean[index:index + width] for index in range(0, len(clean), width)]
-    while len(sentences) < 4:
-        sentences.append("具体的な作業は、利用中の製品の公式案内と組織の運用手順を確認して進めてください。")
-    labels = [
-        ("対策の全体像", "what"),
-        ("優先して行うこと", "how"),
-        ("確認と運用", "why"),
-        ("注意点", "care"),
-    ]
+    labels = ["要点", "補足", "確認事項", "注意点", "追加情報", "まとめ"]
+    kinds = ["what", "how", "why", "care", "what", "care"]
     return [
-        {"title": title, "kind": kind, "body": body[:160]}
-        for (title, kind), body in zip(labels, sentences[:4])
+        {"title": labels[index], "kind": kinds[index], "body": body[:160]}
+        for index, body in enumerate(sentences[:6])
     ]
 
 
 def _result_cards(results: List[Dict[str, Any]]) -> list[Dict[str, str]]:
     """Make a useful visual fallback from one completed web search."""
-    kinds = ["what", "how", "why", "care"]
+    kinds = ["what", "how", "why", "care", "what", "care"]
     cards = []
-    for index, result in enumerate(results[:4]):
+    for index, result in enumerate(results[:6]):
         cards.append({
             "title": result.get("title", f"候補 {index + 1}")[:60],
-            "body": (result.get("snippet") or "詳しい内容は、下の情報源をご確認ください。")[:160],
+            # Search snippets may be in English. Keep this fallback Japanese;
+            # the model-generated explainer provides the translated detail.
+            "body": "検索結果の候補です。詳しい内容は下の情報源でご確認ください。",
             "kind": kinds[index],
         })
     return cards or [{
@@ -229,8 +229,8 @@ class MoriAgent:
                     messages=self.history,
                     tools=TOOLS_SCHEMA,
                     tool_choice="auto",
-                    # Explainer tool calls contain four cards. Leave enough
-                    # room for a complete JSON call rather than truncating it.
+                    # List cards can contain every requested item. Leave enough
+                    # room for a complete Japanese JSON response.
                     max_tokens=2048
                 )
                 

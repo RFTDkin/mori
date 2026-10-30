@@ -35,11 +35,11 @@ class AgentIntentTests(unittest.TestCase):
         self.assertEqual(intent.action, "web_search")
         self.assertEqual(intent.query, "富士山の天気")
 
-    def test_follow_up_answer_becomes_four_explainer_cards(self):
-        cards = _follow_up_cards("まず更新を適用します。次に設定を確認します。ログを監視します。公式情報も確認します。")
+    def test_follow_up_answer_uses_only_the_cards_needed(self):
+        cards = _follow_up_cards("まず更新を適用します。次に設定を確認します。")
 
-        self.assertEqual(len(cards), 4)
-        self.assertEqual([card["kind"] for card in cards], ["what", "how", "why", "care"])
+        self.assertEqual(len(cards), 2)
+        self.assertEqual([card["title"] for card in cards], ["要点", "補足"])
 
     def test_generic_new_question_is_not_treated_as_an_old_explainer_follow_up(self):
         self.assertIsNone(_EXPLAINER_FOLLOW_UP.search("支笏湖 アクティビティ おすすめ教えて"))

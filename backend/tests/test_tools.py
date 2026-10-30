@@ -5,6 +5,17 @@ from backend.tools import execute_tool
 
 
 class ExecuteToolTests(unittest.TestCase):
+    def test_explainer_keeps_all_list_cards_and_line_breaks(self):
+        response = execute_tool("show_explainer", {
+            "title": "参加チーム",
+            "summary": "16チームです。",
+            "cards": [{"title": "入圍賽チーム", "body": "チームA\nチームB", "kind": "list"}] * 7,
+        })
+
+        cards = response["ui_command"]["data"]["cards"]
+        self.assertEqual(len(cards), 7)
+        self.assertEqual(cards[0]["body"], "チームA\nチームB")
+
     @patch("backend.tools.DDGS")
     def test_web_search_returns_displayable_results_from_one_search(self, ddgs_class):
         ddgs_class.return_value.text.return_value = [

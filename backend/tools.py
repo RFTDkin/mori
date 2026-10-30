@@ -293,11 +293,11 @@ def close_ui() -> Dict[str, Any]:
 
 
 def show_explainer(title: str, summary: str, cards: List[Dict[str, str]]) -> Dict[str, Any]:
-    """Display a concise, source-backed visual explanation inside M.O.R.I."""
+    """Display a Japanese, source-backed visual explanation inside M.O.R.I."""
     return {
         "text": summary,
         "ui_command": {"type": "explainer", "data": {
-            "title": title, "summary": summary, "cards": cards[:4], "sources": [],
+            "title": title, "summary": summary, "cards": cards, "sources": [],
         }},
     }
 
@@ -306,15 +306,15 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "show_explainer",
-            "description": "検索結果を、短い要約と最大4枚の分かりやすい図解カードとしてM.O.R.I.画面に表示します。検索後、ユーザーが明示的に元サイトを要求していない通常の説明依頼では必ず使います。",
+            "description": "検索結果を日本語の要約と、内容に応じた枚数の分かりやすいカードとしてM.O.R.I.画面に表示します。枚数を固定しません。一覧・参加者・候補を尋ねられた場合は、漏れがないよう全項目を改行した1枚の一覧カードにします。固有名詞の原表記以外は日本語で書いてください。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "短い見出し"},
                     "summary": {"type": "string", "description": "2文以内、160文字以内の簡潔な説明"},
                     "cards": {"type": "array", "items": {"type": "object", "properties": {
-                        "title": {"type": "string", "description": "30文字以内"}, "body": {"type": "string", "description": "80文字以内、改行なし"},
-                        "kind": {"type": "string", "enum": ["what", "how", "why", "care"]},
+                        "title": {"type": "string", "description": "日本語、30文字以内"}, "body": {"type": "string", "description": "日本語。通常は160文字以内。完全な一覧は改行を使い800文字以内"},
+                        "kind": {"type": "string", "enum": ["what", "how", "why", "care", "list"]},
                     }, "required": ["title", "body", "kind"]}},
                 },
                 "required": ["title", "summary", "cards"],
