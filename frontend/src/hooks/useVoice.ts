@@ -11,6 +11,9 @@ export default function useVoice(onResult: (text: string) => void, onWakeWord: (
   const onWakeWordRef = useRef(onWakeWord);
   const recognitionRef = useRef<any>(null);
   const isListeningRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
 
   // コールバック参照を最新に保つ
   useEffect(() => {
@@ -48,9 +51,9 @@ export default function useVoice(onResult: (text: string) => void, onWakeWord: (
       }
 
       // バージイン: TTS再生中にユーザーが話したら停止
-      if (window.speechSynthesis?.speaking) {
-        window.speechSynthesis.cancel();
-      }
+      window.speechSynthesis?.cancel();
+      ttsAbortRef.current?.abort();
+      audioRef.current?.pause();
 
       onResultRef.current(resultText);
     };
@@ -108,24 +111,44 @@ export default function useVoice(onResult: (text: string) => void, onWakeWord: (
   const speak = useCallback((text: string) => {
     if (!synth) return;
 
-    // 再生中の音声を停止
+    // Stop both the ElevenLabs playback and browser fallback first.
     synth.cancel();
+    ttsAbortRef.current?.abort();
+    audioRef.current?.pause();
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'ja-JP';
+    const speakWithBrowser = () => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ja-JP';
+      const jaVoice = synth.getVoices().find(v => v.lang === 'ja-JP' || v.lang.includes('ja'));
+      if (jaVoice) utterance.voice = jaVoice;
+      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
+      synth.speak(utterance);
+    };
 
-    // 日本語ボイスを探す
-    const voices = synth.getVoices();
-    const jaVoice = voices.find(v => v.lang === 'ja-JP' || v.lang.includes('ja'));
-    if (jaVoice) {
-      utterance.voice = jaVoice;
-    }
-
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-
-    synth.speak(utterance);
+    const controller = new AbortController();
+    ttsAbortRef.current = controller;
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+    void fetch(`${backendUrl}/api/tts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }), signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) throw new Error(`TTS unavailable (${response.status})`);
+      const blob = await response.blob();
+      if (controller.signal.aborted) return;
+      const url = URL.createObjectURL(blob);
+      audioUrlRef.current = url;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onplay = () => setIsSpeaking(true);
+      audio.onended = () => { setIsSpeaking(false); URL.revokeObjectURL(url); };
+      audio.onerror = () => { setIsSpeaking(false); URL.revokeObjectURL(url); speakWithBrowser(); };
+      await audio.play();
+    }).catch((error: unknown) => {
+      if ((error as DOMException).name !== 'AbortError') speakWithBrowser();
+    });
   }, [synth]);
 
   return { isListening, isSpeaking, startListening, stopListening, speak, transcript };

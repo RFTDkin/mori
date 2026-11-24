@@ -37,6 +37,19 @@
 
 ### 1. Groq API Keyの設定
 
+### オプション：ElevenLabsの自然な音声
+
+ブラウザ標準音声の代わりに、ElevenLabsで作成または選択した権利上問題のない日本語音声を使えます。`backend/.env` に以下を追加してください。APIキーはフロントエンドには置きません。
+
+```env
+ELEVENLABS_API_KEY=your_api_key
+ELEVENLABS_VOICE_ID=your_original_voice_id
+ELEVENLABS_MODEL_ID=eleven_flash_v2_5
+```
+
+未設定時やElevenLabsに接続できない時は、従来のブラウザ音声へ自動的に戻ります。
+Freeプランでは、アプリは無料枠と互換性のある音質で再生します。
+
 ```bash
 # backend/.env を編集
 GROQ_API_KEY=your_actual_api_key_here

@@ -20,6 +20,10 @@ class Settings(BaseSettings):
         "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/api/gmail/oauth/callback"
     )
     FRONTEND_ORIGIN: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
+    # Keep the optional ElevenLabs key on the local backend only.
+    ELEVENLABS_API_KEY: str = os.getenv("ELEVENLABS_API_KEY", "")
+    ELEVENLABS_VOICE_ID: str = os.getenv("ELEVENLABS_VOICE_ID", "")
+    ELEVENLABS_MODEL_ID: str = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5")
     
     SYSTEM_PROMPT: str = """あなたはウィリアム・ジェームズ・モリアーティです。元数学教授であり、極めて高い知性とカリスマ性を持ち合わせています。
 親しい友人と話すように、温かく自然な日本語で会話してください。基本は丁寧語ですが、硬すぎる敬語、事務的な定型句、講義のような話し方は避けます。

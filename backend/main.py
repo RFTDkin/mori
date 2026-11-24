@@ -1,10 +1,13 @@
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 import json
 import logging
 import secrets
+import asyncio
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from html import escape
 from google_auth_oauthlib.flow import Flow
 from .agent import MoriAgent
@@ -36,6 +39,36 @@ class ChatResponse(BaseModel):
     text: str
     ui_command: dict | None = None
     tools_used: list = []
+
+class TTSRequest(BaseModel):
+    text: str
+
+def _generate_elevenlabs_speech(text: str) -> bytes:
+    """Generate Japanese speech without exposing the ElevenLabs key to clients."""
+    voice_id = settings.ELEVENLABS_VOICE_ID
+    # 22.05 kHz / 32 kbps is available on the free tier. Higher-quality
+    # formats such as 44.1 kHz / 128 kbps may require a paid ElevenLabs plan.
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_22050_32"
+    payload = json.dumps({
+        "text": text, "model_id": settings.ELEVENLABS_MODEL_ID, "language_code": "ja",
+        "voice_settings": {"stability": 0.45, "similarity_boost": 0.65, "style": 0.15, "use_speaker_boost": True},
+    }).encode("utf-8")
+    request = Request(url, data=payload, method="POST", headers={
+        "xi-api-key": settings.ELEVENLABS_API_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg",
+    })
+    try:
+        with urlopen(request, timeout=25) as response:
+            return response.read()
+    except HTTPError as exc:
+        # The provider's body carries useful non-secret reasons such as a
+        # voice unavailable to free users or insufficient quota. Keep it in
+        # the local server log so configuration issues are diagnosable.
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        logger.warning("ElevenLabs TTS request failed (%s): %s", exc.code, detail)
+        raise RuntimeError("ElevenLabs speech generation failed") from exc
+    except URLError as exc:
+        logger.warning("ElevenLabs TTS connection failed: %s", exc.reason)
+        raise RuntimeError("ElevenLabs is unavailable") from exc
 
 
 def _google_flow(state: str | None = None) -> Flow:
@@ -105,9 +138,17 @@ async def chat_endpoint(request: ChatRequest):
     return ChatResponse(**result)
 
 @app.post("/api/tts")
-async def tts_endpoint():
-    # Placeholder for TTS as frontend uses Web Speech API
-    return {"status": "placeholder"}
+async def tts_endpoint(request: TTSRequest):
+    text = request.text.strip()
+    if not text or len(text) > 5000:
+        raise HTTPException(status_code=400, detail="Text must contain 1–5000 characters")
+    if not settings.ELEVENLABS_API_KEY or not settings.ELEVENLABS_VOICE_ID:
+        raise HTTPException(status_code=503, detail="ElevenLabs is not configured")
+    try:
+        audio = await asyncio.to_thread(_generate_elevenlabs_speech, text)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return Response(content=audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
