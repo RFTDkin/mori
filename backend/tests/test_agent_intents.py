@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from backend.agent import MoriAgent, _EXPLAINER_FOLLOW_UP, _RECOMMENDATION_REQUEST, _concise_reply, _follow_up_cards, _result_cards
+from backend.agent import MoriAgent, _EXPLAINER_FOLLOW_UP, _RECOMMENDATION_REQUEST, _music_search_query, _is_place_recommendation, _concise_reply, _follow_up_cards, _result_cards
 from backend.intents import classify_intent
 
 
@@ -71,6 +71,25 @@ class AgentIntentTests(unittest.TestCase):
 
         execute.assert_called_once_with("get_recommendations", {"query": "札幌大通り付近においしい焼肉教えて"})
         self.assertEqual(result["ui_command"]["type"], "recommendations")
+
+    def test_music_recommendation_is_not_mistaken_for_a_restaurant_request(self):
+        self.assertFalse(_is_place_recommendation("こういう時にどういう曲聞くべき？おすすめある？"))
+        self.assertFalse(_is_place_recommendation("悲しい時に聴く曲をおすすめして"))
+        self.assertTrue(_is_place_recommendation("札幌でおすすめのラーメン店ある？"))
+
+    def test_music_recommendation_opens_playable_youtube_results(self):
+        self.agent.history = [{"role": "user", "content": "友達いないけど、悲しい"}]
+        with patch("backend.agent.execute_tool", return_value={
+            "text": "動画を見つけました。",
+            "ui_command": {"type": "media", "data": {"mode": "youtube", "results": [{"id": "song-1"}]}},
+        }) as execute:
+            result = asyncio.run(self.agent.process_message("こういう時にどういう曲聞くべき？おすすめある？"))
+
+        execute.assert_called_once_with("play_youtube", {"query": "悲しい時に聴く曲"})
+        self.assertEqual(result["ui_command"]["data"]["mode"], "youtube")
+
+    def test_music_query_uses_a_general_playlist_without_a_sad_context(self):
+        self.assertEqual(_music_search_query("おすすめの曲ある？", []), "おすすめのJ-POPプレイリスト")
 
 
 if __name__ == "__main__":

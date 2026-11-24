@@ -325,7 +325,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "get_recommendations",
-            "description": "飲食店・観光・商品などのおすすめを、情報源付きの推薦カードで表示します。",
+            "description": "飲食店、カフェ、旅行先、観光地など、実際に訪れる場所のおすすめを情報源付きカードで表示します。音楽、映画、本、ゲーム、会話中の気分に合う提案には使わないでください。",
             "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
         },
     },

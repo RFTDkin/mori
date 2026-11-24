@@ -21,9 +21,36 @@ _VISUAL_INFORMATION_REQUEST = re.compile(
     re.IGNORECASE,
 )
 _RECOMMENDATION_REQUEST = re.compile(
-    r"おすすめ|お勧め|おすすめは|推薦|人気.*(?:店|場所|観光|アクティビティ)|(?:おいしい|美味しい).*(?:焼肉|店|レストラン|料理|食べ)",
+    r"(?:おすすめ|お勧め|おすすめは|推薦|人気).*(?:店|レストラン|カフェ|料理|食べ|焼肉|場所|観光|旅行|ホテル|アクティビティ)|(?:おいしい|美味しい).*(?:焼肉|店|レストラン|料理|食べ)",
     re.IGNORECASE,
 )
+_MUSIC_RECOMMENDATION_REQUEST = re.compile(
+    r"(?:曲|音楽|歌|プレイリスト|BGM).*(?:おすすめ|お勧め|聴くべき|聞くべき|聴きたい|聞きたい)|(?:おすすめ|お勧め).*(?:曲|音楽|歌|プレイリスト|BGM)",
+    re.IGNORECASE,
+)
+_SAD_MOOD = re.compile(r"悲し|寂し|さみし|つらい|辛い|孤独|ひとり|一人|落ち込", re.IGNORECASE)
+
+
+def _is_place_recommendation(message: str) -> bool:
+    """Reserve visual recommendation cards for real-world places and food.
+
+    A bare 「おすすめある？」 must not be mistaken for a restaurant request:
+    it can mean music, films, books, games, or a continuation of an emotional
+    conversation. Those requests need the normal conversational flow instead.
+    """
+    return bool(_RECOMMENDATION_REQUEST.search(message))
+
+
+def _music_search_query(message: str, history: list[Dict[str, Any]]) -> str:
+    """Turn a conversational music request into a useful YouTube query."""
+    recent_user_text = " ".join(
+        str(item.get("content", ""))
+        for item in history[-8:]
+        if item.get("role") == "user"
+    )
+    if _SAD_MOOD.search(f"{recent_user_text} {message}"):
+        return "悲しい時に聴く曲"
+    return "おすすめのJ-POPプレイリスト"
 
 
 def _concise_reply(text: str, limit: int = 420) -> str:
@@ -199,9 +226,16 @@ class MoriAgent:
             # graph the result). Let the LLM plan those multi-step requests instead
             # of short-circuiting them with a keyword rule.
 
+        # Music recommendations should be playable immediately. They bypass
+        # both explainer cards and place-recommendation cards.
+        if not requested_sources and _MUSIC_RECOMMENDATION_REQUEST.search(user_message):
+            query = _music_search_query(user_message, getattr(self, "history", []))
+            tool_result = await asyncio.to_thread(execute_tool, "play_youtube", {"query": query})
+            return {**tool_result, "tools_used": ["play_youtube"]}
+
         # Recommendations need a comparison of concrete candidates, not the
         # WHAT/HOW/WHY explainer template. Build source-backed cards directly.
-        if not requested_sources and _RECOMMENDATION_REQUEST.search(user_message):
+        if not requested_sources and _is_place_recommendation(user_message):
             tool_result = await asyncio.to_thread(execute_tool, "get_recommendations", {"query": user_message})
             return {**tool_result, "tools_used": ["get_recommendations"]}
 
